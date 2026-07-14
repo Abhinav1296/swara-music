@@ -194,3 +194,67 @@ Resilience details:
   `trackName + artistName`. Shown as `Open In` in TrackMenu and as pills in the
   full-screen player; opened in a new tab (`noopener,noreferrer`). They are a
   legal bridge — in-app audio is now the **full JioSaavn stream**, not a preview.
+
+## Robustness additions (Playback Robustness + Lyrics Sync phase)
+
+Added so auto-advance feels reliable even when Lyrica is cold/slow or a track
+is missing. No UI redesign, no schema changes, queue/shuffle/repeat untouched.
+
+### AbortController — skip cancels the in-flight resolve
+`resolveAndPlay` keeps one `abortControllerRef`. Before starting a NEW resolve it
+aborts the previous controller and starts a fresh `AbortController`, passing
+`signal` to `getSongDetails` (which forwards it to `getJson` → `fetch`). This
+actually kills the network request (the token guard remains a second safety).
+`getSongDetails({ artist, song, url, signal })` is the new signature. If the
+fetch rejects with `AbortError`, the catch logs `[Swara] resolve aborted` and
+does **NOT** set `streamError` — a skip is not a failure.
+
+### Retry on 504 / timeout
+A `504` (or any error whose message matches `/timed out/i`) is retried **once**
+after a 1500–2500 ms backoff, reusing the same token guard (a newer resolve
+aborts the retry mid-backoff). If the retry also fails, it falls through to the
+definitive-failure path below.
+
+### Auto-skip on definitive failure
+A `404` (`/not found/i`) or a failed timeout is definitive: `streamError` is set
+(`"not_found"` / `"upstream"`) and, **if `upcoming` is non-empty**,
+`goNextRef.current()` is called immediately so the user is never stranded on a
+dead track. When `upcoming` is empty the error stays and `FullScreenPlayer`
+renders a glass error panel with a **Retry** button (calls `retry()`, which
+re-resolves the current track). A chain of 404s walks the queue until it empties.
+
+### Prefetch Next (instant auto-advance)
+- `prefetchCacheRef` is an in-memory `Map` keyed by `trackKey(track)` =
+  `artistName|trackName` (lowercased) → `{ song, lyrics }` (already normalized,
+  so it can be applied with zero network wait).
+- `schedulePrefetch()` runs after every successful play/next/prev/restore. It
+  picks the next planned track: **shuffle OFF** → `upcoming[0]`; **shuffle ON** →
+  `plannedNextRef.current` (the pre-decided next — see below). It fires
+  `prefetchTrack` after a 600–1000 ms delay (so it never competes with the
+  current track's resolve) and caps in-flight prefetches at 2 (own
+  AbortControllers in `prefetchControllersRef`, so a skip does NOT abort them).
+- `applyPrefetched(track, autoplay)` is tried **before** `resolveAndPlay` in
+  `play`/`goNext`/`goPrev`. If a cached entry exists it sets `current`/lyrics/
+  `audio.src` and plays **immediately** (no spinner). The prefetch cache is
+  separate from `inflightRef` (the dedupe map for play resolves) so the two
+  never interfere.
+
+### Shuffle-safe planned-next
+`plannedNextRef` holds the pre-decided next track in shuffle mode. It is chosen
+**once** when a track starts (`play`) or after each shuffle advance (`goNext`),
+from the live pool (`played + upcoming`), and **reused** on `ended`/manual Next
+so the shuffle pointer never rerolls mid-list (fixes repeat/wrong-song drift).
+`goNext` falls back to a fresh roll only if the planned track has left the pool.
+
+### Lyrics sync polish (FullScreenPlayer)
+- Timed lyrics hook to `progress` (driven by the audio `timeupdate`); the active
+  line is `resolveActiveLine(lines, progress)` — deterministic, no jitter.
+- Auto-scroll is **throttled**: it fires only when the active index actually
+  changes, at most one smooth `scrollIntoView({behavior:'smooth', block:'center'})`
+  per ~250 ms; line changes faster than that get a non-animated jump so we never
+  stack animations or fall behind. Re-runs when the Lyrics tab opens so it lands
+  on the current line.
+- Click-to-seek is ms-accurate: `seek(Math.max(0, l.time))` sets
+  `audio.currentTime` directly (timed lines carry `time` in seconds; plain lines
+  are not seekable). Missing lyrics still show the premium "Lyrics not available"
+  state and never block playback.

@@ -118,3 +118,14 @@ edge cases are noted at the end.
 - **Search covers may show placeholders**: see "Backend / API limitations"
   above — when JioSaavn enrichment doesn't match a `/suggestion` title, the grid
   shows the gradient placeholder until the track is played.
+
+- **Auto-skip chains through missing tracks**: a `404` (or failed `504`/timeout)
+  now auto-advances to the next queued track when one exists, so a dead track
+  never stalls playback. A run of missing tracks walks the queue until it is
+  empty, at which point the full-screen player shows a glass error panel with a
+  **Retry** button. This is intended, not a loop bug.
+- **Prefetch is best-effort and in-memory only**: the next planned track is
+  prefetched (capped at 2 in-flight, own AbortControllers) so auto-advance is
+  instant most of the time. It is not persisted and is cleared on reload; a
+  missed prefetch simply falls back to a normal resolve. The prefetch cache never
+  touches queue state.

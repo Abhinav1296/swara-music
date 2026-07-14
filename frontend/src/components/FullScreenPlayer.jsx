@@ -10,6 +10,7 @@ import {
   Music2,
   Pause,
   Play,
+  RefreshCw,
   Repeat,
   Repeat1,
   Shuffle,
@@ -47,6 +48,7 @@ export default function FullScreenPlayer() {
     streamError,
     lyrics,
     lyricsStatus,
+    retry,
     toggle,
     next,
     prev,
@@ -61,6 +63,10 @@ export default function FullScreenPlayer() {
   const [rightTab, setRightTab] = useState("upnext"); // "upnext" | "lyrics"
   const containerRef = useRef(null);
   const lineRefs = useRef([]);
+  // Throttle/avoid scroll spam: remember the last line we scrolled to and the
+  // last time we did a smooth scroll (so we don't fire constant animations).
+  const lastScrollIndexRef = useRef(-2);
+  const lastScrollTimeRef = useRef(0);
 
   // Esc closes; lock body scroll while open.
   useEffect(() => {
@@ -73,18 +79,26 @@ export default function FullScreenPlayer() {
   const activeIndex =
     lyrics && lyrics.kind === "timed" ? resolveActiveLine(lyrics.lines, progress) : -1;
 
-  // Auto-scroll the active lyric line to the vertical center.
+  // Smoothly scroll the active lyric line into the vertical center. We only
+  // scroll when the active line actually changes (jitter-free), and throttle
+  // to at most one smooth scroll per ~250ms — rapid line changes within that
+  // window get a non-animated jump so we never fall far behind or stack
+  // animations. Re-runs when the lyrics tab opens so we land on the right line.
   useEffect(() => {
     if (activeIndex < 0 || !containerRef.current) return;
     const el = lineRefs.current[activeIndex];
-    const c = containerRef.current;
-    if (el) {
-      c.scrollTo({
-        top: el.offsetTop - c.clientHeight / 2 + el.clientHeight / 2,
-        behavior: "smooth",
-      });
+    if (!el) return;
+    if (activeIndex === lastScrollIndexRef.current) return; // no re-scroll
+    const now = Date.now();
+    const since = now - lastScrollTimeRef.current;
+    if (since < 250) {
+      el.scrollIntoView({ behavior: "auto", block: "center" });
+    } else {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-  }, [activeIndex, lyrics]);
+    lastScrollIndexRef.current = activeIndex;
+    lastScrollTimeRef.current = now;
+  }, [activeIndex, lyrics, rightTab]);
 
   const pct = duration ? Math.min(100, (progress / duration) * 100) : 0;
   const art = current?.artworkUrl600 || current?.artworkUrl100;
@@ -294,13 +308,34 @@ export default function FullScreenPlayer() {
               </div>
 
               {/* Stream resolution status (glass error / resolving states) */}
-              {streamError && (
+              {streamError && upcoming.length > 0 && (
                 <div className="mt-3 rounded-full bg-white/10 px-4 py-1.5 text-center text-xs text-white/70">
                   {streamError === "no_stream"
                     ? "Full song unavailable — try a link above"
                     : streamError === "not_found"
-                    ? "Track not found"
-                    : "Couldn’t reach the music service"}
+                    ? "Track not found — skipping"
+                    : "Couldn’t reach the music service — skipping"}
+                </div>
+              )}
+              {streamError && upcoming.length === 0 && (
+                <div className="glass mt-3 flex flex-col items-center gap-2 rounded-2xl px-5 py-3 text-center">
+                  <p className="text-sm text-white/80">
+                    {streamError === "no_stream"
+                      ? "Full song unavailable"
+                      : streamError === "not_found"
+                      ? "Track not found"
+                      : "Couldn’t reach the music service"}
+                  </p>
+                  <p className="max-w-[16rem] text-xs text-white/40">
+                    Nothing queued next — retry, or listen via a link above.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={retry}
+                    className="mt-1 flex items-center gap-1.5 rounded-full bg-white/15 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-white/25"
+                  >
+                    <RefreshCw size={14} /> Retry
+                  </button>
                 </div>
               )}
             </div>
@@ -376,7 +411,7 @@ export default function FullScreenPlayer() {
                           key={i}
                           type="button"
                           ref={(el) => (lineRefs.current[i] = el)}
-                          onClick={() => seek(l.time)}
+                          onClick={() => seek(Math.max(0, l.time))}
                           className={`block w-full text-left text-lg leading-relaxed transition ${
                             i === activeIndex
                               ? "font-semibold text-white"

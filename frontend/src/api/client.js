@@ -8,8 +8,8 @@ import { normalizeTrack } from "../utils/trackAdapter";
 
 const BASE = import.meta.env.VITE_API_BASE || "/api";
 
-async function getJson(path) {
-  const res = await fetch(`${BASE}${path}`);
+async function getJson(path, { signal } = {}) {
+  const res = await fetch(`${BASE}${path}`, signal ? { signal } : undefined);
   if (!res.ok) {
     let detail = `Request failed (${res.status})`;
     try {
@@ -59,14 +59,17 @@ export function getShelf(query, limit = 20) {
  * Resolve a track into a full-length stream + synced/plain lyrics + metadata.
  * Returns the raw backend SongDetails (caller normalizes lyrics/artwork).
  *
- * @param {{artist:string, song:string, url?:string}} opts
+ * @param {{artist:string, song:string, url?:string, signal?:AbortSignal}} opts
+ *   `signal` is forwarded to fetch so callers can abort an in-flight resolve
+ *   (e.g. when the user skips before it completes). Aborting throws an
+ *   `AbortError`, which the player treats as a benign cancel (not a failure).
  */
-export function getSongDetails({ artist, song, url } = {}) {
+export function getSongDetails({ artist, song, url, signal } = {}) {
   const params = new URLSearchParams();
   if (artist) params.set("artist", artist);
   if (song) params.set("song", song);
   if (url) params.set("url", url);
-  return getJson(`/song-details?${params.toString()}`);
+  return getJson(`/song-details?${params.toString()}`, { signal });
 }
 
 /**

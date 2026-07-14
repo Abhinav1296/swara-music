@@ -60,6 +60,10 @@ metadata**. This is what the player calls on every play.
 - Response: `SongDetails` (see schema below).
 - Successes are cached in-memory (keyed by normalized `artist|song`, TTL
   `SONG_CACHE_TTL` = 6h). Failures are never cached.
+- The frontend client (`api/client.js::getSongDetails`) accepts an optional
+  `AbortSignal` and forwards it to `fetch`, so an in-flight resolve can be
+  cancelled when the user skips before it returns (the player treats the
+  resulting `AbortError` as a benign cancel, not a failure).
 - A successful resolution with **no stream URL** still returns `200` with
   `hasFullStream=false` (player shows "stream unavailable"). Only when *both*
   lyrics and stream are unresolvable does it return `404`.
