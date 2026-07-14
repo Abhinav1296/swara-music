@@ -90,9 +90,15 @@ mostly presentational. `FullScreenPlayer`, `PlaylistView`, `TrackMenu`,
 
 ## Highest-value next tasks (suggested, not started)
 
-1. **Personalized / cached Home** — reduce the ~8 cold-load requests (cache
-   searches, memoize Popular Artists) and consider lightweight "because you
-   liked" shelves built from local likes (no backend needed).
+1. **Caching / perf for Home** — reduce the ~8 cold-load requests (cache
+   searches, memoize Popular Artists). The local "Because You Liked" shelf
+   (built from local likes, no backend) is DONE; it self-defers so it never
+   slows cold-load. Remaining: cache the mood/Popular-Artists fetches more
+   aggressively.
+- **Phase 4 DONE** — Video Song Mode (full-screen Video tab: YouTube search
+  embed, pauses in-app audio while open, "Play Video Song" in TrackMenu) and the
+  local "Because You Liked" shelf on Home. Branch `worktree-perf-stabilization`
+  now targets `main` (created at the playback-robustness baseline).
 2. **Playlist quality-of-life** — reorder tracks (drag), duplicate-song
    indicators, and a "playlist from Liked" shortcut. Keep localStorage model.
 3. **Accessibility & keyboard nav** — focus management in modals/menus,

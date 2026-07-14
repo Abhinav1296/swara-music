@@ -66,6 +66,10 @@ export function normalizeTrack(t) {
     artistId: t.artistId ?? null,
     collectionId: t.collectionId ?? null,
     jiosaavnUrl: t.jiosaavnUrl ?? null,
+    // Pass the raw Lyrica metadata through so consumers (e.g. the full-screen
+    // Video tab) can read a direct video URL if one is ever present. Optional
+    // and unused by most components — purely additive, fully backward-compatible.
+    metadata: t.metadata ?? null,
   };
 }
 

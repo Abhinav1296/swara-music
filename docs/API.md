@@ -186,3 +186,9 @@ adapter converts these to `{ time, text }` (seconds) for the karaoke highlight.
   graceful error on failure; retries are user-initiated.
 - Some tracks resolve lyrics but no stream (or vice-versa); both are handled
   gracefully.
+- **No new backend field or endpoint was added for the Video tab.** Video is
+  resolved entirely client-side: the full-screen player reads an optional direct
+  video URL from the existing `SongDetails.metadata` (forward-compatible only —
+  today's Lyrica `metadata.links` has no video URL), and otherwise builds a
+  YouTube search embed from `trackName` + `artistName`. The "Because You Liked"
+  shelf reuses the existing `/api/search` endpoint; no new route was added.

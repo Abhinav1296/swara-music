@@ -6,6 +6,7 @@ import { getShelf, getTrending } from "../api/client";
 import { placeholderArtwork } from "../utils/trackAdapter";
 import Section from "./Section";
 import ArtistCard from "./ArtistCard";
+import RecommendationsShelf from "./RecommendationsShelf";
 
 // Curated Telugu moods → search queries. Each becomes a horizontal shelf.
 const MOOD_SECTIONS = [
@@ -39,6 +40,9 @@ export default function HomeView() {
 
   // Unique artists accumulated from tracks already fetched for the hero/shelves.
   const artistMapRef = useRef(new Map());
+  // Song ids already shown on Home (trending + mood shelves), so the
+  // recommendations shelf can dedupe against them (read at fetch time).
+  const displayedIdsRef = useRef(new Set());
 
   const addTracks = useCallback((tracks) => {
     let changed = false;
@@ -61,6 +65,13 @@ export default function HomeView() {
     }
   }, []);
 
+  // Record displayed track ids for recommendations dedupe.
+  const markDisplayed = useCallback((tracks) => {
+    for (const t of tracks || []) {
+      if (t?.id) displayedIdsRef.current.add(t.id);
+    }
+  }, []);
+
   // Trending powers both the hero and the first shelf, and seeds Popular Artists.
   useEffect(() => {
     let active = true;
@@ -69,6 +80,7 @@ export default function HomeView() {
         if (!active) return;
         setTrending(d.results);
         addTracks(d.results);
+        markDisplayed(d.results);
         setArtistsLoading(false);
       })
       .catch(() => {
@@ -137,7 +149,10 @@ export default function HomeView() {
           title={s.title}
           fetch={() => getShelf(s.query, 20)}
           fetchKey={s.query}
-          onFetched={addTracks}
+          onFetched={(tracks) => {
+            addTracks(tracks);
+            markDisplayed(tracks);
+          }}
           onSeeAll={() => navigate("search", { q: s.query })}
         />
       ))}
@@ -158,6 +173,10 @@ export default function HomeView() {
             : artists.map((a) => <ArtistCard key={a.id} artist={a} />)}
         </div>
       </section>
+
+      {/* Local, account-free recommendations derived from likes + recents.
+          Self-defers so it never slows the Home cold-load. */}
+      <RecommendationsShelf displayedIdsRef={displayedIdsRef} />
     </div>
   );
 }

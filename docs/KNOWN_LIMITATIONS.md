@@ -23,9 +23,20 @@ edge cases are noted at the end.
   Apple Music buttons open search URLs in a new tab. In-app audio is the full
   JioSaavn stream (resolved through Lyrica) — no in-app scraping of those
   services.
-- **Recommendations engine not implemented**: Home shelves are curated static
-  Telugu mood queries + a fixed Popular Artists list. There is no personalized
-  recommendation system. (Out of scope.)
+- **Video tab depends on YouTube embedding**: the full-screen Video tab embeds
+  YouTube via `youtube.com/embed?listType=search&list=<query>`. YouTube blocks
+  embedding for some videos/regions (copyright, owner settings), in which case
+  the iframe shows "Video unavailable" and the user must use the "Open on
+  YouTube" button. There is no direct JioSaavn music-video source; if a future
+  Lyrica payload carries a `videoUrl`/`playable_url` field it is used instead.
+  Opening the tab pauses in-app audio to avoid double sound.
+- **No personalized/server recommendations**: Home shelves are curated static
+  Telugu mood queries + a fixed Popular Artists list. There is **no** account or
+  backend recommendation engine. A local, account-free **"Because You Liked"**
+  shelf exists (derived from your liked songs + recently played, weighted by
+  recency + like count, via the existing `/api/search`); it is heuristic, may
+  repeat artists across seeds, and hides itself when there are no likes or when
+  the search fails — it is not a trained recommender.
 - **No social features**: No sharing, following, or collaborative playlists.
 - **Telugu-only by design**: `normalize_query` biases every search toward Telugu.
   Non-Telugu queries are still biased (appended " telugu"), so the app is not a

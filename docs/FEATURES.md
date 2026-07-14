@@ -46,6 +46,28 @@ current app is the union of all three.
   and click-to-seek. Local demo lyrics load by track id / title match; no
   scraping.
 
+## Phase 4 — Video Song Mode + Local Recommendations
+
+- **Video Song Mode** (full-screen player): a new **Video** tab alongside Up
+  Next and Lyrics (existing tabs are preserved). It shows a music video for the
+  current track via a direct Lyrica video URL when present, otherwise a YouTube
+  search embed (`youtube.com/embed?listType=search&list=<track query>`). Opening
+  the Video tab **pauses the in-app audio** so you never hear two sources at
+  once, and audio is restored when you leave the tab or close the player (a
+  manual play/pause on the tab is always respected). A "Video unavailable" state
+  and an "Open on YouTube" fallback cover embed-restricted videos. `TrackMenu`
+  has a **"Play Video Song"** action that plays the track and opens the player
+  on the Video tab.
+- **Local "Because You Liked" shelf** (Home): a fully client-side, account-free
+  recommendations shelf. Seed artists are derived from the user's liked songs +
+  recently played (weighted by recency + like count); for each seed the player
+  fetches a few related tracks via the existing `/api/search` endpoint and shows
+  them under a "Because you liked <Artist>" heading. It dedupes against liked
+  tracks and against tracks already on Home, hides silently when there are no
+  likes, hides per-seed (never crashes) on backend failure, and caches results
+  in-memory for the session. The fetch is deferred (idle + short delay) so it
+  never slows the Home cold-load. No new backend, no user account.
+
 ## What works now (summary)
 - Search, Home shelves, Trending, Artist/Album detail, Library, Playlists.
 - Full player: play/pause/next/prev/seek/volume/shuffle/repeat.
@@ -54,6 +76,11 @@ current app is the union of all three.
 - Queue + current track + position survive reload (best effort).
 - External links (YouTube / Spotify / Apple Music) from any track and the
   full-screen player; a Lyrics tab with local demo data.
+- Full-screen **Video** tab: music video via YouTube search embed (or a direct
+  Lyrica video URL), pausing in-app audio while open; "Play Video Song" in any
+  track's menu opens it directly.
+- Home **"Because You Liked"** shelf: local, account-free recommendations from
+  your likes + recently played, deferred so Home stays fast.
 
 ## User flows
 

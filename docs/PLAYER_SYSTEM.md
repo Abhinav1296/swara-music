@@ -133,11 +133,48 @@ Resilience details:
   Close: chevron-down or `Esc` (`closeFullscreen()`) — returns to the mini bar.
 - Shows: large blurred-artwork backdrop, big cover, title/artist + LikeButton,
   seek bar (gradient fill), transport (shuffle/prev/play/next/repeat), volume,
-  and an in-view **Up Next** list (`upcoming`; click to jump via `play`).
+  and an in-view **Up Next** list (`upcoming`; click to jump via `play`). The
+  right panel also has **Lyrics** and **Video** tabs (see "Video tab" below).
 - A resolving overlay (spinner + "Resolving full song…") appears over the artwork
   while `isResolvingStream`. If `streamError` is set, a glass pill explains the
   state ("Full song unavailable", "Track not found", "Couldn't reach the music
   service") and the external links remain as a fallback.
+
+### Video tab (Video Song Mode)
+
+The right panel has a third tab, **Video**, alongside Up Next and Lyrics
+(neither existing tab is removed). It shows a music video for the current
+track without ever breaking in-app audio playback.
+
+Video source strategy (in priority order):
+1. **Direct video URL** — if a (future) Lyrica payload carries a video URL field
+   on `song.metadata` or `song` (checked defensively: `videoUrl` / `video_url` /
+   `youtubeUrl` / `youtube_url` / `playable_url` / `stream_url_video`), that URL
+   is embedded directly. Today's Lyrica `metadata.links` only exposes
+   itunes/lastfm/musicbrainz/wikipedia, so this path is forward-compatible only.
+2. **YouTube search embed** — otherwise the player builds
+   `https://www.youtube.com/embed?listType=search&list=<query>` where `<query>`
+   is `` `${trackName} ${artistName} telugu official video` `` (URL-encoded).
+   This shows the top YouTube result for the track inside the app.
+
+Audio coordination (the key invariant): **opening the Video tab pauses the
+in-app `<audio>` element so the user never hears two sources at once.** The
+player only auto-resumes audio if *it* paused it and the audio is still paused —
+a manual play/pause by the user on the Video tab is always respected. Audio is
+restored when the user switches away from the Video tab **or** closes the
+full-screen player while on it.
+
+Graceful fallback: if there is no track loaded, the tab shows a "Video
+unavailable" card. YouTube may refuse to embed certain videos (region/owner
+restrictions); in that case the iframe itself shows YouTube's own "Video
+unavailable" state, and the panel always offers an **"Open on YouTube"** button
+that opens the search in a new tab. No embed failure ever crashes the player.
+
+`TrackMenu` gained a **"Play Video Song"** action that plays the track (so it
+becomes `current`) and opens the full-screen player directly on the Video tab.
+The requested tab is stashed in `pendingTabRef` (PlayerContext) and honored once
+on open, so reopening the player keeps the last-used tab unless a tab was
+explicitly requested.
 
 ## Important edge cases
 
@@ -161,7 +198,8 @@ Resilience details:
 ## Files to touch for player changes
 - `context/PlayerContext.jsx` — all state + logic (incl. async resolve).
 - `components/NowPlayingBar.jsx` — mini bar UI (+ resolving/error hints).
-- `components/FullScreenPlayer.jsx` — full-screen UI (+ lyrics + errors).
+- `components/FullScreenPlayer.jsx` — full-screen UI (+ lyrics + video + errors).
+- `components/VideoPanel.jsx` — Video tab body (YouTube embed + fallback).
 - `components/QueuePanel.jsx` — slide-in Up Next.
 - `utils/storage.js` — `swara:queue` / `swara:volume` / `swara:shuffle` /
   `swara:repeat` keys.

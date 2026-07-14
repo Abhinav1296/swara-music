@@ -16,12 +16,14 @@ import {
   Shuffle,
   SkipBack,
   SkipForward,
+  Video,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
 import LikeButton from "./LikeButton";
+import VideoPanel from "./VideoPanel";
 import { formatTime } from "../utils/format";
 import { buildExternalLinks, EXTERNAL_LINKS } from "../utils/externalLinks";
 import { resolveActiveLine } from "../lyrics/lyrics";
@@ -58,15 +60,21 @@ export default function FullScreenPlayer() {
     cycleRepeat,
     closeFullscreen,
     play,
+    pendingTabRef,
   } = usePlayer();
 
-  const [rightTab, setRightTab] = useState("upnext"); // "upnext" | "lyrics"
+  const [rightTab, setRightTab] = useState("upnext"); // "upnext" | "lyrics" | "video"
   const containerRef = useRef(null);
   const lineRefs = useRef([]);
   // Throttle/avoid scroll spam: remember the last line we scrolled to and the
   // last time we did a smooth scroll (so we don't fire constant animations).
   const lastScrollIndexRef = useRef(-2);
   const lastScrollTimeRef = useRef(0);
+  // Audio/video coordination: when the Video tab is open we pause the in-app
+  // <audio> so the user never hears two sources at once. These refs let us
+  // restore the previous play state when the tab/video is closed.
+  const videoPausedAudioRef = useRef(false);
+  const prevTabRef = useRef("upnext");
 
   // Esc closes; lock body scroll while open.
   useEffect(() => {
@@ -78,6 +86,50 @@ export default function FullScreenPlayer() {
 
   const activeIndex =
     lyrics && lyrics.kind === "timed" ? resolveActiveLine(lyrics.lines, progress) : -1;
+
+  // Honor a tab requested when the player was opened (e.g. TrackMenu's
+  // "Play Video Song" → openFullscreen("video")). Only jumps on open, and only
+  // when a specific tab was actually requested, so reopening keeps the last tab.
+  useEffect(() => {
+    if (!fullscreen) return undefined;
+    const t = pendingTabRef?.current;
+    if (t) {
+      setRightTab(t);
+      pendingTabRef.current = null;
+    }
+    return undefined;
+  }, [fullscreen, pendingTabRef]);
+
+  // Pause the in-app audio while the Video tab is open (so we never stack the
+  // JioSaavn audio under the YouTube video), and restore it when the tab or the
+  // player closes. We only auto-resume if *we* paused it and it's still paused —
+  // a manual play/pause by the user on the video tab is always respected.
+  useEffect(() => {
+    const wasVideo = prevTabRef.current === "video";
+    const isVideo = rightTab === "video";
+    if (isVideo && !wasVideo && fullscreen) {
+      if (isPlaying) {
+        videoPausedAudioRef.current = true;
+        toggle();
+      }
+    } else if (!isVideo && wasVideo) {
+      if (videoPausedAudioRef.current && !isPlaying) {
+        toggle();
+      }
+      videoPausedAudioRef.current = false;
+    }
+    prevTabRef.current = rightTab;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rightTab, fullscreen, isPlaying, toggle]);
+
+  // If the player is closed while the Video tab is open, restore audio too.
+  useEffect(() => {
+    if (!fullscreen && videoPausedAudioRef.current && !isPlaying) {
+      videoPausedAudioRef.current = false;
+      toggle();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreen, isPlaying, toggle]);
 
   // Smoothly scroll the active lyric line into the vertical center. We only
   // scroll when the active line actually changes (jitter-free), and throttle
@@ -357,6 +409,13 @@ export default function FullScreenPlayer() {
                 >
                   <Mic2 size={15} /> Lyrics
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setRightTab("video")}
+                  className={tabCls(rightTab === "video")}
+                >
+                  <Video size={15} /> Video
+                </button>
               </div>
 
               {rightTab === "upnext" ? (
@@ -389,6 +448,10 @@ export default function FullScreenPlayer() {
                       </button>
                     ))
                   )}
+                </div>
+              ) : rightTab === "video" ? (
+                <div className="no-scrollbar relative flex-1 overflow-y-auto rounded-2xl px-1">
+                  <VideoPanel current={current} />
                 </div>
               ) : (
                 <div ref={containerRef} className="no-scrollbar relative flex-1 overflow-y-auto rounded-2xl px-1">
