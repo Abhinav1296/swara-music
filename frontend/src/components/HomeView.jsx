@@ -1,12 +1,11 @@
-import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
 import { useRouter } from "../context/RouterContext";
-import { getShelf, getTrending, searchSongs } from "../api/client";
+import { getShelf, getTrending } from "../api/client";
+import { placeholderArtwork } from "../utils/trackAdapter";
 import Section from "./Section";
 import ArtistCard from "./ArtistCard";
-import SkeletonCard from "./SkeletonCard";
 
 // Curated Telugu moods → search queries. Each becomes a horizontal shelf.
 const MOOD_SECTIONS = [
@@ -16,20 +15,19 @@ const MOOD_SECTIONS = [
   { title: "Melodies", query: "telugu melody songs" },
 ];
 
-// Artists surfaced as tappable circular cards.
-const ARTIST_NAMES = [
-  "Sid Sriram",
-  "Anirudh Ravichander",
-  "Anurag Kulkarni",
-  "Devi Sri Prasad",
-  "S. Thaman",
-  "Shreya Ghoshal",
-  "S. P. Balasubrahmanyam",
-];
+// How many artist tiles to surface in the Popular Artists rail.
+const MAX_ARTISTS = 12;
+// Skeleton count while the first artist batch is resolving.
+const ARTIST_SKELETONS = 8;
 
 /**
  * Home: a premium gradient hero (featured track) followed by several
  * horizontal shelves — Trending, mood-based sections, and Popular Artists.
+ *
+ * Popular Artists is derived from the tracks we already fetch for the hero and
+ * the mood shelves (unique artist names + reused track artwork), so it costs no
+ * extra backend calls — previously Home fired 7 × /api/search?limit=1 just to
+ * resolve artist avatars.
  */
 export default function HomeView() {
   const { current, isPlaying, play } = usePlayer();
@@ -39,44 +37,49 @@ export default function HomeView() {
   const [artists, setArtists] = useState([]);
   const [artistsLoading, setArtistsLoading] = useState(true);
 
-  // Trending powers both the hero and the first shelf.
+  // Unique artists accumulated from tracks already fetched for the hero/shelves.
+  const artistMapRef = useRef(new Map());
+
+  const addTracks = useCallback((tracks) => {
+    let changed = false;
+    for (const t of tracks || []) {
+      const name = t?.artistName;
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (artistMapRef.current.has(key)) continue;
+      const artwork = t?.artworkUrl600 || t?.artworkUrl100;
+      artistMapRef.current.set(key, {
+        id: t.id,
+        name,
+        // Fall back to a deterministic gradient tile when a track has no art.
+        artwork: artwork || placeholderArtwork(name),
+      });
+      changed = true;
+    }
+    if (changed) {
+      setArtists(Array.from(artistMapRef.current.values()).slice(0, MAX_ARTISTS));
+    }
+  }, []);
+
+  // Trending powers both the hero and the first shelf, and seeds Popular Artists.
   useEffect(() => {
     let active = true;
     getTrending(20)
-      .then((d) => active && setTrending(d.results))
-      .catch(() => active && setTrending([]));
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  // Resolve featured artists into cards (grab each artist's top song for art/id).
-  useEffect(() => {
-    let active = true;
-    setArtistsLoading(true);
-    Promise.all(
-      ARTIST_NAMES.map((name) =>
-        searchSongs(name, 1)
-          .then((d) => d.results[0])
-          .catch(() => null)
-      )
-    )
-      .then((songs) => {
+      .then((d) => {
         if (!active) return;
-        const resolved = songs
-          .filter(Boolean)
-          .map((s) => ({
-            id: s.id,
-            name: s.artistName,
-            artwork: s.artworkUrl600 || s.artworkUrl100,
-          }));
-        setArtists(resolved);
+        setTrending(d.results);
+        addTracks(d.results);
+        setArtistsLoading(false);
       })
-      .finally(() => active && setArtistsLoading(false));
+      .catch(() => {
+        if (!active) return;
+        setTrending([]);
+        setArtistsLoading(false);
+      });
     return () => {
       active = false;
     };
-  }, []);
+  }, [addTracks]);
 
   const featured = trending[0];
   const featuredPlaying = featured && current?.id === featured.id && isPlaying;
@@ -124,24 +127,29 @@ export default function HomeView() {
         onSeeAll={() => navigate("search", { q: "telugu hits" })}
       />
 
-      {/* Mood / vibe shelves */}
+      {/* Mood / vibe shelves.
+          `fetchKey` is the stable dependency for Section's effect, so passing a
+          fresh `fetch` arrow each render no longer triggers a refetch loop.
+          `onFetched` feeds the shelf tracks into the Popular Artists rail. */}
       {MOOD_SECTIONS.map((s) => (
         <Section
           key={s.query}
           title={s.title}
           fetch={() => getShelf(s.query, 20)}
+          fetchKey={s.query}
+          onFetched={addTracks}
           onSeeAll={() => navigate("search", { q: s.query })}
         />
       ))}
 
-      {/* Popular Artists */}
+      {/* Popular Artists — derived from trending + shelf tracks, no extra calls */}
       <section className="mb-8">
         <div className="mb-3 px-1">
           <h2 className="text-xl font-bold tracking-tight text-white">Popular Artists</h2>
         </div>
         <div className="no-scrollbar flex snap-x gap-4 overflow-x-auto scroll-smooth pb-2">
           {artistsLoading
-            ? ARTIST_NAMES.map((_, i) => (
+            ? Array.from({ length: ARTIST_SKELETONS }).map((_, i) => (
                 <div key={i} className="flex w-40 shrink-0 flex-col items-center gap-3">
                   <div className="h-40 w-40 animate-pulse rounded-full bg-white/5" />
                   <div className="h-3 w-24 animate-pulse rounded bg-white/5" />

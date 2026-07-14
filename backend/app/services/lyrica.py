@@ -18,6 +18,7 @@ Responsibilities:
 * Centralize HTTP errors so routes can translate them into proper statuses
   (504 timeout, 502 upstream, 404 not found).
 """
+import asyncio
 import contextvars
 import hashlib
 import logging
@@ -45,6 +46,109 @@ _TELUGU_INDICATORS = ("telugu", "tollywood", "kollywood", "south", "dj", "tamil"
 # A plain dict is safe here: FastAPI runs one event loop per worker and we never
 # await between the check and the set, so there is no interleaving to guard.
 _SONG_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+
+# Shared, pooled httpx.AsyncClient. Created once via the FastAPI lifespan hook
+# (see app.main) and reused for every upstream call so keep-alive connections
+# avoid the 0.5–1.5s TLS handshake that a per-request client pays each time.
+# ``None`` until the lifespan starts it; all callers go through get_client().
+_http_client: Optional[httpx.AsyncClient] = None
+
+# Bounds concurrent upstream calls to Lyrica/JioSaavn so a burst of Home
+# requests can't overload the personal Lyrica instance.
+_upstream_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_UPSTREAM)
+
+
+def get_client() -> Optional[httpx.AsyncClient]:
+    """Return the shared pooled client (or None before the lifespan starts it)."""
+    return _http_client
+
+
+def set_http_client(client: httpx.AsyncClient) -> None:
+    """Install the process-wide pooled client (called from the FastAPI lifespan)."""
+    global _http_client
+    _http_client = client
+
+
+def clear_http_client() -> None:
+    """Drop the pooled client reference (called on lifespan shutdown)."""
+    global _http_client
+    _http_client = None
+
+
+# --------------------------------------------------------------------------- #
+# TTL cache + in-flight coalescing for the read-heavy list endpoints
+# --------------------------------------------------------------------------- #
+# Each namespace holds:
+#   "store":    key -> (expires_at_epoch, payload)
+#   "inflight": key -> asyncio.Task   (an in-progress upstream call)
+# Concurrent identical requests share a single upstream call via the inflight
+# task; on completion the result is cached. A size cap + LRU eviction bounds
+# memory, and expired entries are dropped on access / during eviction sweeps.
+_CACHES: Dict[str, Dict[str, Any]] = {
+    "search": {"store": {}, "inflight": {}},
+    "trending": {"store": {}, "inflight": {}},
+    "lookup": {"store": {}, "inflight": {}},
+}
+
+
+def cache_clear() -> None:
+    """Drop all cached results (song-details + list endpoints). Tests / admin."""
+    _SONG_CACHE.clear()
+    for _ns in _CACHES.values():
+        _ns["store"].clear()
+        _ns["inflight"].clear()
+
+
+def _evict(store: Dict[str, Tuple[float, Any]], now: float) -> None:
+    """Drop expired entries, then the oldest (LRU by insertion order), until the
+    store shrinks back under settings.CACHE_MAX_ENTRIES."""
+    if len(store) < settings.CACHE_MAX_ENTRIES:
+        return
+    for _k in [k for k, (exp, _v) in store.items() if now > exp]:
+        del store[_k]
+    while len(store) >= settings.CACHE_MAX_ENTRIES:
+        store.pop(next(iter(store)))
+
+
+async def _cached(namespace: str, key: str, ttl: int, maker) -> Any:
+    """Return the cached value for ``key``, computing it via ``maker`` on miss.
+
+    Concurrent identical requests (same namespace+key) share one upstream call
+    through an in-flight asyncio.Task, so a burst of Home loads coalesces into a
+    single Lyrica/JioSaavn request. Only successful results are cached; errors
+    propagate and are never stored.
+    """
+    ns = _CACHES[namespace]
+    store = ns["store"]
+    inflight = ns["inflight"]
+    now = time.time()
+
+    item = store.get(key)
+    if item is not None:
+        expires_at, value = item
+        if now <= expires_at:
+            logger.info("[perf] %s cache HIT %s", namespace, key)
+            store[key] = (expires_at, value)  # bump recency (LRU)
+            return value
+        del store[key]
+
+    task = inflight.get(key)
+    if task is not None:
+        logger.info("[perf] %s cache COALESCE %s", namespace, key)
+        return await task
+
+    async def _run() -> Any:
+        try:
+            value = await maker()
+            store[key] = (time.time() + ttl, value)
+            _evict(store, time.time())
+            return value
+        finally:
+            inflight.pop(key, None)
+
+    task = asyncio.create_task(_run())
+    inflight[key] = task
+    return await task
 
 
 class LyricaError(Exception):
@@ -138,13 +242,27 @@ async def _get_json(url: str, params: Dict[str, Any]) -> Dict[str, Any]:
     path = urlparse(url).path
     t0 = time.perf_counter()
     try:
-        async with httpx.AsyncClient(
-            timeout=settings.lyrica_timeout,
-            headers=_headers(),
-            follow_redirects=True,
-        ) as client:
-            logger.info("[perf] upstream %s GET %s", rid, path)
-            resp = await client.get(url, params=params)
+        async with _upstream_semaphore:
+            client = get_client()
+            if client is None:
+                # Safety net: per-call client if the lifespan hasn't attached one.
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(
+                        connect=settings.LYRICA_CONNECT_TIMEOUT,
+                        read=settings.LYRICA_READ_TIMEOUT,
+                        write=settings.LYRICA_READ_TIMEOUT,
+                        pool=settings.LYRICA_READ_TIMEOUT,
+                    ),
+                    headers=_headers(),
+                    follow_redirects=True,
+                ) as client:
+                    logger.info("[perf] upstream %s GET %s", rid, path)
+                    resp = await client.get(url, params=params)
+            else:
+                logger.info("[perf] upstream %s GET %s", rid, path)
+                resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            payload = resp.json()
         elapsed = (time.perf_counter() - t0) * 1000
         logger.info(
             "[perf] upstream %s %s status=%d in %.1fms",
@@ -153,8 +271,7 @@ async def _get_json(url: str, params: Dict[str, Any]) -> Dict[str, Any]:
             resp.status_code,
             elapsed,
         )
-        resp.raise_for_status()
-        return resp.json()
+        return payload
     except httpx.TimeoutException as exc:  # connect or read timeout
         elapsed = (time.perf_counter() - t0) * 1000
         logger.warning("[perf] upstream %s %s TIMEOUT in %.1fms", rid, path, elapsed)
@@ -276,11 +393,6 @@ def _cache_set(key: str, payload: Dict[str, Any]) -> None:
     _SONG_CACHE[key] = (time.time() + settings.SONG_CACHE_TTL, payload)
 
 
-def cache_clear() -> None:
-    """Drop all cached song-details (used by tests / admin)."""
-    _SONG_CACHE.clear()
-
-
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
@@ -390,17 +502,23 @@ async def get_song_details(
         return cached
     logger.info("[perf] song-details cache MISS %s", key)
 
-    # 1) Lyrics + metadata (can raise → 5xx)
-    lyrics_payload = await _fetch_lyrics(artist, song)
+    # 1) Lyrics + metadata (can raise → 5xx). Start it now and let it overlap
+    #    with stream resolution below, since the two hit independent upstreams.
+    lyrics_task = asyncio.create_task(_fetch_lyrics(artist, song))
 
-    # 2) Stream (best effort — never raises)
+    # 2) Stream (best effort — never raises).
     stream_url: Optional[str] = None
     if url:
         stream_url = await _fetch_stream(url)
-    if not stream_url:
-        js = await _search_jiosaavn(f"{artist} {song}")
-        if js and js[0].get("perma_url"):
-            stream_url = await _fetch_stream(js[0]["perma_url"])
+    # JioSaavn search is independent of the lyrics fetch, so it overlaps with it.
+    js = (await _search_jiosaavn(f"{artist} {song}")) if not stream_url else None
+
+    # Await lyrics last so any upstream transport error surfaces as 5xx
+    # (preserving the original failure semantics exactly).
+    lyrics_payload = await lyrics_task
+
+    if not stream_url and js and js[0].get("perma_url"):
+        stream_url = await _fetch_stream(js[0]["perma_url"])
 
     if not lyrics_payload and not stream_url:
         logger.info("song not found: %s / %s", artist, song)
@@ -484,35 +602,35 @@ async def search_songs(query: str, limit: Optional[int] = None) -> Dict[str, Any
 
     Calls Lyrica ``/suggestion`` for the catalog list and enriches each result
     with JioSaavn artwork + ``perma_url`` (best effort, never fails the search).
+    The catalog and the JioSaavn enrichment are independent, so they run
+    concurrently. Results are cached (TTL) and concurrent identical queries
+    coalesce into a single upstream call.
     """
     term = normalize_query(query)
     limit = min(max(limit or settings.DEFAULT_LIMIT, 1), settings.MAX_LIMIT)
 
-    suggestion_task = _get_json(
-        f"{settings.LYRICA_URL}/suggestion", {"q": term, "limit": limit}
-    )
-
-    try:
-        suggestion = await suggestion_task
-    except LyricaError as exc:
-        # The primary catalog source failed → surface as upstream error.
-        raise
-
-    raw_results: List[Dict[str, str]] = (suggestion.get("results") or [])
-    # Best-effort parallel JioSaavn enrichment (does not fail the search).
-    js_results = await _search_jiosaavn(term)
-    matched = _match_jiosaavn(raw_results, js_results)
-
-    results = [
-        _to_search_song(
-            item.get("artist", ""),
-            item.get("title", ""),
-            matched.get(f"{item.get('artist')}|{item.get('title')}"),
+    async def maker() -> Dict[str, Any]:
+        # /suggestion is the authoritative catalog source and may raise (→ 5xx);
+        # the JioSaavn enrichment is best-effort. Run them together.
+        suggestion, js_results = await asyncio.gather(
+            _get_json(
+                f"{settings.LYRICA_URL}/suggestion", {"q": term, "limit": limit}
+            ),
+            _search_jiosaavn(term),
         )
-        for item in raw_results
-    ]
+        raw_results: List[Dict[str, str]] = suggestion.get("results") or []
+        matched = _match_jiosaavn(raw_results, js_results)
+        results = [
+            _to_search_song(
+                item.get("artist", ""),
+                item.get("title", ""),
+                matched.get(f"{item.get('artist')}|{item.get('title')}"),
+            )
+            for item in raw_results
+        ]
+        return {"query": term, "count": len(results), "results": results, "source": "lyrica"}
 
-    return {"query": term, "count": len(results), "results": results, "source": "lyrica"}
+    return await _cached("search", f"{term}|{limit}", settings.SEARCH_CACHE_TTL, maker)
 
 
 async def get_trending(limit: Optional[int] = None) -> Dict[str, Any]:
@@ -531,16 +649,22 @@ async def search_jiosaavn_tracks(
 
     Returns real, artwork-rich, stream-ready Telugu tracks — used for the Home
     trending/shelf queries where ``/suggestion`` quality is poor for broad terms.
+    Cached (TTL) and coalesced so the Hero + each mood shelf share one upstream
+    call per distinct query.
     """
     term = normalize_query(query)
     limit = min(max(limit or settings.DEFAULT_LIMIT, 1), settings.MAX_LIMIT)
-    js_results = await _search_jiosaavn(term)
-    js_results = js_results[:limit]
-    results = [
-        _to_search_song(js.get("artist", ""), js.get("title", ""), js)
-        for js in js_results
-    ]
-    return {"query": term, "count": len(results), "results": results, "source": "lyrica"}
+
+    async def maker() -> Dict[str, Any]:
+        js_results = await _search_jiosaavn(term)
+        js_results = js_results[:limit]
+        results = [
+            _to_search_song(js.get("artist", ""), js.get("title", ""), js)
+            for js in js_results
+        ]
+        return {"query": term, "count": len(results), "results": results, "source": "lyrica"}
+
+    return await _cached("trending", f"{term}|{limit}", settings.TRENDING_CACHE_TTL, maker)
 
 
 def _fuzzy_contains(haystack: str, needle: str) -> bool:
@@ -560,25 +684,31 @@ async def lookup_artist(name: str, limit: Optional[int] = None) -> Dict[str, Any
     never needlessly empty.
     """
     limit = min(max(limit or settings.DEFAULT_LIMIT, 1), settings.MAX_LIMIT)
-    js_results = await _search_jiosaavn(f"{name} telugu")
-    norm_target = _norm(name)
-    matched = [
-        js for js in js_results
-        if _fuzzy_contains(_norm(js.get("artist")), norm_target)
-    ]
-    chosen = (matched or js_results)[:limit]
-    results = [
-        _to_search_song(_js_artist(js) or name, js.get("title") or "", js)
-        for js in chosen
-    ]
-    artwork = results[0]["artworkUrl600"] if results else None
-    return {
-        "type": "artist",
-        "title": name,
-        "artworkUrl600": artwork,
-        "results": results,
-        "source": "lyrica",
-    }
+
+    async def maker() -> Dict[str, Any]:
+        js_results = await _search_jiosaavn(f"{name} telugu")
+        norm_target = _norm(name)
+        matched = [
+            js for js in js_results
+            if _fuzzy_contains(_norm(js.get("artist")), norm_target)
+        ]
+        chosen = (matched or js_results)[:limit]
+        results = [
+            _to_search_song(_js_artist(js) or name, js.get("title") or "", js)
+            for js in chosen
+        ]
+        artwork = results[0]["artworkUrl600"] if results else None
+        return {
+            "type": "artist",
+            "title": name,
+            "artworkUrl600": artwork,
+            "results": results,
+            "source": "lyrica",
+        }
+
+    return await _cached(
+        "lookup", f"artist|{name.lower()}|{limit}", settings.LOOKUP_CACHE_TTL, maker
+    )
 
 
 async def lookup_album(
@@ -592,23 +722,32 @@ async def lookup_album(
     the raw search results so the page still renders something useful.
     """
     limit = min(max(limit or settings.DEFAULT_LIMIT, 1), settings.MAX_LIMIT)
-    query = f"{name} {artist}".strip() if artist else name
-    js_results = await _search_jiosaavn(query)
-    norm_target = _norm(name)
-    matched = [
-        js for js in js_results
-        if _fuzzy_contains(_norm(_js_album(js)), norm_target)
-    ]
-    chosen = (matched or js_results)[:limit]
-    results = [
-        _to_search_song(_js_artist(js) or "", js.get("title") or "", js)
-        for js in chosen
-    ]
-    artwork = results[0]["artworkUrl600"] if results else None
-    return {
-        "type": "album",
-        "title": name,
-        "artworkUrl600": artwork,
-        "results": results,
-        "source": "lyrica",
-    }
+
+    async def maker() -> Dict[str, Any]:
+        query = f"{name} {artist}".strip() if artist else name
+        js_results = await _search_jiosaavn(query)
+        norm_target = _norm(name)
+        matched = [
+            js for js in js_results
+            if _fuzzy_contains(_norm(_js_album(js)), norm_target)
+        ]
+        chosen = (matched or js_results)[:limit]
+        results = [
+            _to_search_song(_js_artist(js) or "", js.get("title") or "", js)
+            for js in chosen
+        ]
+        artwork = results[0]["artworkUrl600"] if results else None
+        return {
+            "type": "album",
+            "title": name,
+            "artworkUrl600": artwork,
+            "results": results,
+            "source": "lyrica",
+        }
+
+    return await _cached(
+        "lookup",
+        f"album|{name.lower()}|{(artist or '').lower()}|{limit}",
+        settings.LOOKUP_CACHE_TTL,
+        maker,
+    )

@@ -9,7 +9,7 @@ import SkeletonCard from "./SkeletonCard";
  * data when a `fetch` fn is provided; otherwise renders `songs` directly
  * (useful to share data already loaded by the parent).
  */
-export default function Section({ title, fetch, songs: provided, onSeeAll }) {
+export default function Section({ title, fetch, fetchKey, songs: provided, onSeeAll, onFetched }) {
   const [songs, setSongs] = useState(provided || []);
   const [loading, setLoading] = useState(!provided);
   const scrollerRef = useRef(null);
@@ -24,13 +24,21 @@ export default function Section({ title, fetch, songs: provided, onSeeAll }) {
     let active = true;
     setLoading(true);
     fetch()
-      .then((d) => active && setSongs(d?.results || []))
+      .then((d) => {
+        if (!active) return;
+        const results = d?.results || [];
+        setSongs(results);
+        if (onFetched) onFetched(results);
+      })
       .catch(() => active && setSongs([]))
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [fetch, provided]);
+    // `fetchKey` (not the unstable `fetch` arrow) is the refetch trigger, so a
+    // fresh `fetch` fn per render no longer causes a refetch loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchKey, provided]);
 
   const scroll = (dir) => {
     const el = scrollerRef.current;
