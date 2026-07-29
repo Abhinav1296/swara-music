@@ -46,6 +46,96 @@ body {
   background-clip: padding-box;
 }
 
+/* ========================================================================
+   Range slider thumbs (seek bar + volume bar).
+   Without these, `appearance-none` makes the thumb invisible on Chrome/Edge.
+   Applies to every <input type="range"> globally so we don't have to repeat
+   utility classes on each slider.
+   ======================================================================== */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]:focus {
+  outline: none;
+}
+
+input[type="range"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* WebKit (Chrome, Edge, Safari, Opera) */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: transparent; /* Tailwind bg on the input controls this */
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #fa233b;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 3px rgba(250, 35, 59, 0.15), 0 1px 2px rgba(0, 0, 0, 0.4);
+  margin-top: -5px; /* center the thumb on the 4px track */
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+input[type="range"]:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px rgba(250, 35, 59, 0.22), 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.25);
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: none;
+}
+
+/* Firefox */
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: transparent;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #fa233b;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 3px rgba(250, 35, 59, 0.15), 0 1px 2px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+input[type="range"]:hover::-moz-range-thumb {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 4px rgba(250, 35, 59, 0.22), 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+input[type="range"]:active::-moz-range-thumb {
+  transform: scale(1.25);
+}
+
+input[type="range"]:disabled::-moz-range-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: none;
+}
+
 @layer components {
   /* Reusable frosted-glass surfaces. */
   .glass {

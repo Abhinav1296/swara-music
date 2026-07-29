@@ -19,29 +19,42 @@ const SUGGESTIONS = [
   "Telugu Devotional",
 ];
 
+// Search debounce config
+const DEBOUNCE_MS = 700;
+const MIN_CHARS = 3;
+
 /**
  * Sticky glass top bar with a debounced, live-search field.
- * - Typing (after a short debounce) triggers a search via `onSearch`.
+ * - Typing (after DEBOUNCE_MS pause AND >= MIN_CHARS) triggers a search.
+ * - Skips identical consecutive queries to avoid duplicate fetches.
  * - Focusing shows a dropdown: recent searches + curated suggestions.
- * - Enter / clicking a suggestion saves the term to recent searches.
+ * - Enter / clicking a suggestion always searches (bypasses min-chars).
  */
 export default function TopBar({ onSearch }) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
   const [debounced, setDebounced] = useState("");
   const wrapRef = useRef(null);
+  const lastFiredRef = useRef("");
 
   const { items: recent, add: addRecent, clear: clearRecent, remove: removeRecent } =
     useRecentSearches();
 
-  // Debounce the input → live search.
+  // Debounce the input.
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(value), 350);
+    const t = setTimeout(() => setDebounced(value), DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [value]);
 
+  // Fire the search only when:
+  // - debounced value has at least MIN_CHARS
+  // - it is different from the last fired query (skip identical repeats)
   useEffect(() => {
-    if (debounced.trim()) onSearch(debounced);
+    const term = debounced.trim();
+    if (term.length < MIN_CHARS) return;
+    if (term === lastFiredRef.current) return;
+    lastFiredRef.current = term;
+    onSearch(term);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounced]);
 
@@ -54,12 +67,14 @@ export default function TopBar({ onSearch }) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
+  // Explicit search (Enter / suggestion click) bypasses min-chars gate.
   const runSearch = (q) => {
     const term = (q || "").trim();
     if (!term) return;
     setValue(term);
     addRecent(term);
     setFocused(false);
+    lastFiredRef.current = term;
     onSearch(term);
   };
 
@@ -91,7 +106,10 @@ export default function TopBar({ onSearch }) {
           {value && (
             <button
               type="button"
-              onClick={() => setValue("")}
+              onClick={() => {
+                setValue("");
+                lastFiredRef.current = "";
+              }}
               aria-label="Clear search"
               className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 transition hover:text-white"
             >

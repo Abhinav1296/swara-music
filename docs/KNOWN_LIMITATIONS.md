@@ -80,6 +80,24 @@ edge cases are noted at the end.
   (a "Resolving full song…" state shows). A quick pause during resolution is
   respected (`wantPlayRef`).
 
+## Stream-First Tradeoffs (NEW)
+
+- **Album art appears from search result immediately** — the optimistic `current`
+  update on play means artwork/title/artist show instantly from the user's
+  selection. The backend `/api/stream` response may include different artwork
+  (from JioSaavn metadata), but the frontend **never overwrites** the
+  user-selected artwork/title/artist. Only `streamUrl` and `durationMs` are
+  merged.
+- **Lyrics may lag audio by a few seconds** — `/api/song-details` runs in the
+  background after stream starts. The Lyrics tab shows a loading state until
+  they arrive. This is intentional: audio must never wait on lyrics.
+- **Prefetch is stream-only** — planned-next tracks are prefetched via
+  `/api/stream` only. Lyrics are fetched on actual play. This keeps prefetch
+  fast and bandwidth-light.
+- **Retry logic is scoped to stream** — 504/502 on `/api/stream` retries once;
+  lyrics failures only set `lyricsStatus = "unavailable"` and never affect
+  playback.
+
 ## Real edge cases / bugs to be aware of
 
 - **Restored track won't autoplay** — by design (browser policy). The user must
@@ -118,3 +136,16 @@ edge cases are noted at the end.
 - **Search covers may show placeholders**: see "Backend / API limitations"
   above — when JioSaavn enrichment doesn't match a `/suggestion` title, the grid
   shows the gradient placeholder until the track is played.
+- **Stream-first tradeoff: lyrics may lag behind audio**: Because `/api/stream`
+  fires first and `/api/song-details` runs in the background, lyrics and rich
+  metadata (mood, album art from metadata) can appear seconds after playback
+  starts. The UI shows the search-result artwork/title immediately (optimistic),
+  so there's no visual "loading" gap for the user — but the Lyrics tab may show
+  "Loading…" briefly after audio begins.
+- **Stream-first tradeoff: rare bad-match risk**: The fast `/api/stream` path
+  uses a JioSaavn search for "artist song" and takes the top match. In rare
+  cases (ambiguous names, multiple versions) this could resolve a different
+  recording than the user expects. The full `/api/song-details` resolution (with
+  Lyrica lyrics/metadata) runs afterward and may correct metadata, but the
+  stream URL itself won't be swapped once playback starts (to avoid audio
+  glitches). This is an accepted tradeoff for sub-4s time-to-first-audio.

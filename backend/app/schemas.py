@@ -9,10 +9,9 @@ shape (`title`, `artist`, `album`, `artwork`, `durationMs`, `streamUrl`,
 
 Source of truth is now **Lyrica** (lyrics/metadata) + **JioSaavn** (audio).
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field
-
 
 class SyncedLine(BaseModel):
     """One timestamped lyric line, time in milliseconds."""
@@ -100,4 +99,17 @@ class LookupResponse(BaseModel):
     title: str = ""
     artworkUrl600: Optional[str] = None
     results: List[Song] = Field(default_factory=list)
+    source: str = "lyrica"
+
+
+class StreamResponse(BaseModel):
+    """Lightweight stream-only response for fast playback start."""
+
+    status: Literal["success", "not_found", "error"]
+    stream_url: str | None = None
+    artist: str
+    title: str
+    album: str | None = None
+    artwork: str | None = None
+    durationMs: int | None = None
     source: str = "lyrica"

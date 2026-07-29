@@ -3,12 +3,13 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import { loadJSON, saveJSON, STORAGE_KEYS } from "../utils/storage";
 import { useLibrary } from "./LibraryContext";
-import { getSongDetails } from "../api/client";
+import { getSongDetails, getStream } from "../api/client";
 import { normalizeLyrics, normalizeTrack } from "../utils/trackAdapter";
 
 /**
@@ -19,32 +20,48 @@ import { normalizeLyrics, normalizeTrack } from "../utils/trackAdapter";
  *   - `upcoming`  : tracks queued after `current` (Play Next inserts here)
  *   - `played`    : history before `current` (for Previous / shuffle pool)
  *
- * Streaming model (post-Lyrica migration):
- *   - A single shared <audio> element plays FULL-LENGTH streams resolved from
- *     Lyrica/JioSaavn (no more 30s iTunes previews).
- *   - On play, we optimistically show the track metadata, then asynchronously
- *     resolve the stream + synced lyrics via GET /api/song-details. The player
- *     shows a resolving state and only begins playback once the stream URL is
- *     in hand. No auth, no full-track server storage — queue/likes/prefs live
- *     in localStorage. Shuffle / repeat / volume persist.
+ * STREAM-FIRST ARCHITECTURE:
+ *   - A single shared <audio> element plays FULL-LENGTH streams from JioSaavn.
+ *   - On play, we IMMEDIATELY set `current` to the user-picked track metadata
+ *     AND update `currentTrackIdRef` synchronously (optimistic UI).
+ *   - Then we fire `/api/stream` FIRST (fast) with AbortController.
+ *   - When `stream_url` arrives: set `audio.src`, call `audio.play()`,
+ *     merge ONLY safe fields (streamUrl, durationMs) into `current` —
+ *     NEVER overwrite title/artist/artwork from the user's selection.
+ *   - IMMEDIATELY after starting stream, fire `/api/song-details` in background
+ *     for lyrics/mood/metadata. Stale-check uses currentTrackIdRef (live) not
+ *     the closure-captured `current` (fixes lyrics randomly missing bug).
+ *   - `isPlaying` state STRICTLY mirrors the <audio> element via event listeners.
+ *   - Prefetch planned-next uses ONLY `/api/stream`; never mutates `current`.
+ *   - Retry/auto-skip scoped to `/api/stream`.
+ *
+ * REF-DRIVEN INVARIANTS (fixes stale-closure bugs):
+ *   - `currentTrackIdRef` : live id of the current track for async stale checks.
+ *   - `transportRef`      : { current, upcoming, played, shuffle, repeat } — read
+ *                            inside useCallback([]) bodies to avoid stale state.
+ *   - Context `value` is wrapped in useMemo so purely-presentational consumers
+ *     (SongCard shelves, etc.) do not re-render on every progress tick.
  */
 const PlayerContext = createContext(null);
 
-// repeat cycles: off -> all -> one -> off
 const REPEAT_CYCLE = ["off", "all", "one"];
 
 export function PlayerProvider({ children }) {
   const audioRef = useRef(null);
   const { addRecentlyPlayed } = useLibrary();
 
-  const [current, setCurrent] = useState(null);
+  // --- Queue state ---
+  const [current, setCurrentState] = useState(null);
   const [upcoming, setUpcoming] = useState([]);
   const [played, setPlayed] = useState([]);
 
+  // --- Playback state (mirrors <audio> element) ---
   const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0); // seconds
-  const [duration, setDuration] = useState(0); // seconds
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
 
+  // --- Persisted preferences ---
   const [volume, setVolumeState] = useState(() =>
     Number(loadJSON(STORAGE_KEYS.volume, 0.8))
   );
@@ -57,192 +74,351 @@ export function PlayerProvider({ children }) {
   const [queueOpen, setQueueOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
 
-  // --- Async stream resolution state ---
+  // --- Async resolution state ---
   const [isResolvingStream, setIsResolvingStream] = useState(false);
-  // streamError: null | "no_stream" | "not_found" | "upstream"
   const [streamError, setStreamError] = useState(null);
   const [lyrics, setLyrics] = useState(null);
-  // lyricsStatus: "idle" | "loading" | "available" | "unavailable"
   const [lyricsStatus, setLyricsStatus] = useState("idle");
 
-  // Ref mirroring the latest transport state so the (stable) `ended`
-  // handler never reads stale closures.
+  // --- Refs for stale-closure guards & coordination ---
   const transportRef = useRef({});
   transportRef.current = { current, upcoming, played, shuffle, repeat };
 
-  // --- Queue persistence -------------------------------------------------
   const progressRef = useRef(0);
   const pendingSeekRef = useRef(null);
   const restoredRef = useRef(false);
   const resolveTokenRef = useRef(0);
-  const inflightRef = useRef(new Map());
-  // Desired play state, so a quick pause during async resolve is respected.
   const wantPlayRef = useRef(false);
 
-  // Resolve a track's full stream + synced lyrics from /api/song-details.
-  // Deduplicates identical in-flight resolves, ignores stale responses when
-  // the user skips quickly, and never corrupts the queue on failure.
-  const resolveAndPlay = useCallback(async (track, autoplay) => {
+  // CRITICAL: currentTrackIdRef mirrors the LIVE current track id.
+  // Updated synchronously by setCurrent() so async callbacks (especially
+  // resolveLyrics) can check the true current id instead of a stale closure.
+  const currentTrackIdRef = useRef(null);
+
+  // AbortControllers for in-flight requests (per track resolution)
+  const streamAbortRef = useRef(null);
+  const lyricsAbortRef = useRef(null);
+
+  // Prefetch cache for planned-next (stream-only, keyed by artist|title)
+  const prefetchCacheRef = useRef(new Map());
+
+  // Forward refs for functions defined later (avoid circular deps in useCallback)
+  const goNextRef = useRef(null);
+  const toggleRef = useRef(null);
+
+  // Wrapper: always keep currentTrackIdRef in sync with setCurrent
+  const setCurrent = useCallback((next) => {
+    if (typeof next === "function") {
+      setCurrentState((prev) => {
+        const val = next(prev);
+        currentTrackIdRef.current = val?.id ?? null;
+        return val;
+      });
+    } else {
+      currentTrackIdRef.current = next?.id ?? null;
+      setCurrentState(next);
+    }
+  }, []);
+
+  // ========================================================================
+  // STREAM-FIRST: Fast stream resolution via /api/stream
+  // Reads upcoming.length via transportRef (LIVE) — never stale closure.
+  // ========================================================================
+  const resolveStream = useCallback(async (track, autoplay) => {
     if (!track) return;
-    // eslint-disable-next-line no-console
-    console.log("[Swara] resolveAndPlay entry", {
+    console.log("[Swara] resolveStream entry", {
       track: track?.trackName,
       autoplay,
       currentToken: resolveTokenRef.current,
     });
-    const key = `${(track.artistName || "").toLowerCase()}|${(track.trackName || "").toLowerCase()}`;
-    const token = (resolveTokenRef.current += 1);
-    // eslint-disable-next-line no-console
-    console.log("[Swara] resolveAndPlay new token", { token, key });
 
-    // Dedupe: if an identical resolve is already in flight, reuse it.
-    const existing = inflightRef.current.get(key);
-    if (existing) {
-      // eslint-disable-next-line no-console
-      console.log("[Swara] resolveAndPlay dedupe hit, reusing in-flight", { key, token });
-      return existing;
-    }
+    const token = (resolveTokenRef.current += 1);
+    console.log("[Swara] resolveStream new token", { token });
+
+    if (streamAbortRef.current) streamAbortRef.current.abort();
+    const abortController = new AbortController();
+    streamAbortRef.current = abortController;
 
     setIsResolvingStream(true);
     setStreamError(null);
+
+    try {
+      const streamData = await getStream({
+        artist: track.artistName,
+        song: track.trackName,
+        url: track.jiosaavnUrl,
+        signal: abortController.signal,
+      });
+
+      if (token !== resolveTokenRef.current) {
+        console.log("[Swara] resolveStream stale token, aborting");
+        return;
+      }
+
+      if (streamData?.status === "not_found" || !streamData?.stream_url) {
+        setStreamError("not_found");
+        setIsResolvingStream(false);
+        // LIVE read from transportRef — auto-skip fires correctly now
+        if ((transportRef.current.upcoming?.length ?? 0) > 0) {
+          console.log("[Swara] stream not found, auto-skipping to next");
+          goNextRef.current?.();
+        }
+        return;
+      }
+
+      const audio = audioRef.current;
+      if (audio && streamData.stream_url) {
+        if (token !== resolveTokenRef.current) {
+          console.log("[Swara] resolveStream bailing before src assign (stale)");
+          return;
+        }
+
+        console.log("[Swara] resolveStream assigning src", { token });
+
+        setCurrent((prev) =>
+          prev
+            ? {
+                ...prev,
+                streamUrl: streamData.stream_url,
+                durationMs: streamData.durationMs ?? prev.durationMs,
+                hasFullStream: true,
+              }
+            : null
+        );
+
+        audio.src = streamData.stream_url;
+        audio.load();
+
+        if (autoplay && wantPlayRef.current) {
+          console.log("[Swara] resolveStream PLAY", { token });
+          try {
+            await audio.play();
+          } catch (e) {
+            console.warn("[Swara] audio.play() rejected:", e);
+            setIsPlaying(false);
+          }
+        } else {
+          console.log("[Swara] resolveStream NOT playing (waiting for user)");
+          setIsPlaying(false);
+        }
+      } else {
+        setStreamError("no_stream");
+        setIsPlaying(false);
+      }
+
+      setIsResolvingStream(false);
+    } catch (err) {
+      if (token !== resolveTokenRef.current) return;
+      if (err?.name === "AbortError") {
+        console.log("[Swara] resolveStream aborted");
+        return;
+      }
+      console.warn("[Swara] stream resolve failed:", err);
+      const status = err?.status;
+      if (status === 429) {
+        const retryAfter = Number(err?.retryAfter) || 2;
+        setStreamError("rate_limited");
+        setTimeout(() => {
+          if (resolveTokenRef.current === token && wantPlayRef.current) {
+            resolveStream(track, autoplay);
+          }
+        }, Math.min(retryAfter * 1000, 5000));
+      } else if (status === 504 || status === 502) {
+        setStreamError("upstream");
+        setTimeout(() => {
+          if (resolveTokenRef.current === token && wantPlayRef.current) {
+            console.log("[Swara] resolveStream retry after timeout");
+            resolveStream(track, autoplay);
+          }
+        }, 1500 + Math.random() * 1000);
+      } else if (status === 404) {
+        setStreamError("not_found");
+        setIsResolvingStream(false);
+        // LIVE read from transportRef — auto-skip fires correctly now
+        if ((transportRef.current.upcoming?.length ?? 0) > 0) {
+          console.log("[Swara] 404 on stream, auto-skipping");
+          goNextRef.current?.();
+        }
+      } else {
+        setStreamError("upstream");
+        setIsResolvingStream(false);
+      }
+    }
+  }, [setCurrent]);
+
+  // ========================================================================
+  // BACKGROUND: Full metadata + lyrics via /api/song-details
+  // Uses currentTrackIdRef (live) NOT closure `current` to avoid stale discards.
+  // ========================================================================
+  const resolveLyrics = useCallback(async (track) => {
+    if (!track) return;
+
+    if (lyricsAbortRef.current) lyricsAbortRef.current.abort();
+    const abortController = new AbortController();
+    lyricsAbortRef.current = abortController;
+
     setLyricsStatus("loading");
     setLyrics(null);
 
-    const run = (async () => {
-      try {
-        const details = await getSongDetails({
-          artist: track.artistName,
-          song: track.trackName,
-          url: track.jiosaavnUrl || undefined,
+    try {
+      const details = await getSongDetails({
+        artist: track.artistName,
+        song: track.trackName,
+        url: track.jiosaavnUrl,
+        signal: abortController.signal,
+      });
+
+      // LIVE stale check — reads currentTrackIdRef, not stale closure
+      if (currentTrackIdRef.current !== track.id) {
+        console.log("[Swara] resolveLyrics stale track, discarding", {
+          liveId: currentTrackIdRef.current,
+          reqId: track.id,
         });
-        // eslint-disable-next-line no-console
-        console.log("[Swara] resolveAndPlay post-resolve token check", {
-          track: track?.trackName,
-          token,
-          currentToken: resolveTokenRef.current,
-          stale: token !== resolveTokenRef.current,
-        });
-        // Token guard (1 of 2): a newer resolve started while we awaited the
-        // network → throw this stale response away BEFORE mutating any state.
-        if (token !== resolveTokenRef.current) return;
+        return;
+      }
 
-        const resolved = normalizeTrack(details);
-        // Preserve the originally-clicked track's id so likes/queue identity
-        // stays stable (e.g. old iTunes-era numeric ids vs new Lyrica slugs).
-        setCurrent({ ...resolved, id: track.id });
+      const norm = normalizeLyrics(details.lyrics);
+      if (norm.kind === "unavailable") {
+        setLyrics(null);
+        setLyricsStatus("unavailable");
+      } else {
+        setLyrics(norm);
+        setLyricsStatus("available");
+      }
 
-        const norm = normalizeLyrics(details.lyrics);
-        if (norm.kind === "unavailable") {
-          setLyrics(null);
-          setLyricsStatus("unavailable");
-        } else {
-          setLyrics(norm);
-          setLyricsStatus("available");
-        }
-
-        if (resolved.streamUrl) {
-          const audio = audioRef.current;
-          if (audio) {
-            // Token guard (2 of 2): re-check RIGHT BEFORE mutating the audio
-            // element. If the user skipped again during resolution we must NOT
-            // clobber the now-current track's src with a stale stream URL.
-            if (token !== resolveTokenRef.current) {
-              // eslint-disable-next-line no-console
-              console.log(
-                "[Swara] resolveAndPlay bailing before src assign (stale token)",
-                { token, currentToken: resolveTokenRef.current }
-              );
-              return;
+      // Merge additional metadata (but NEVER title/artist from user selection)
+      setCurrent((prev) =>
+        prev && prev.id === track.id
+          ? {
+              ...prev,
+              album: details.album || prev.album,
+              artwork: details.artwork || prev.artwork,
+              durationMs: details.durationMs ?? prev.durationMs,
+              lyricsAvailable: norm.kind !== "unavailable",
+              jiosaavnUrl: details.jiosaavnUrl || prev.jiosaavnUrl,
+              mood: details.mood || prev.mood,
+              metadata: details.metadata || prev.metadata,
             }
-            // eslint-disable-next-line no-console
-            console.log("[Swara] resolveAndPlay assigning src", {
-              token,
-              streamUrl: resolved.streamUrl,
-            });
-            audio.src = resolved.streamUrl;
-            audio.load();
-            if (autoplay && wantPlayRef.current) {
-              // eslint-disable-next-line no-console
-              console.log("[Swara] resolveAndPlay PLAY", {
-                token,
-                autoplay,
-                wantPlay: wantPlayRef.current,
-              });
-              audio.play().catch(() => setIsPlaying(false));
-              setIsPlaying(true);
-            } else {
-              // eslint-disable-next-line no-console
-              console.log("[Swara] resolveAndPlay NOT playing", {
-                token,
-                autoplay,
-                wantPlay: wantPlayRef.current,
-              });
-              setIsPlaying(false);
-            }
-          }
-        } else {
-          // Track resolved but no playable stream → graceful state.
-          setStreamError("no_stream");
-          setIsPlaying(false);
-        }
-      } catch (err) {
-        if (token !== resolveTokenRef.current) return;
-        // eslint-disable-next-line no-console
-        console.warn("[Swara] stream resolve failed:", err);
-        setStreamError(err?.status === 404 ? "not_found" : "upstream");
+          : prev
+      );
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        console.log("[Swara] resolveLyrics aborted");
+        return;
+      }
+      console.warn("[Swara] lyrics resolve failed:", err);
+      if (currentTrackIdRef.current === track.id) {
         setLyricsStatus("unavailable");
         setLyrics(null);
-        setIsPlaying(false);
-      } finally {
-        if (token === resolveTokenRef.current) setIsResolvingStream(false);
-        inflightRef.current.delete(key);
       }
-    })();
+    }
+  }, [setCurrent]);
 
-    inflightRef.current.set(key, run);
-    return run;
+  // ========================================================================
+  // PREFETCH: Stream-only for planned-next track
+  // ========================================================================
+  const prefetchNext = useCallback((track) => {
+    if (!track) return;
+    const key = `${(track.artistName || "").toLowerCase()}|${(track.trackName || "").toLowerCase()}`;
+    if (prefetchCacheRef.current.has(key)) return;
+
+    console.log("[Swara] prefetchNext for", track.trackName);
+
+    const abortController = new AbortController();
+    getStream({
+      artist: track.artistName,
+      song: track.trackName,
+      url: track.jiosaavnUrl,
+      signal: abortController.signal,
+    })
+      .then((streamData) => {
+        if (streamData?.stream_url) {
+          prefetchCacheRef.current.set(key, {
+            streamUrl: streamData.stream_url,
+            durationMs: streamData.durationMs,
+          });
+          console.log("[Swara] prefetchNext cached", key);
+        }
+      })
+      .catch((err) => {
+        if (err?.name !== "AbortError") {
+          console.warn("[Swara] prefetchNext failed:", err);
+        }
+      });
   }, []);
 
-  // Restore queue + current track from a previous session (best effort).
-  // We load stream + lyrics for the restored track but do NOT autoplay
-  // (browsers block it; the user resumes by pressing play).
+  // ========================================================================
+  // COMBINED: Main entry point for playing a track
+  // Reads upcoming via transportRef (live) — never stale.
+  // ========================================================================
+  const resolveAndPlay = useCallback(
+    (track, autoplay) => {
+      if (!track) return;
+
+      console.log("[Swara] resolveAndPlay entry", {
+        track: track?.trackName,
+        autoplay,
+      });
+
+      // 1. IMMEDIATELY set current (also updates currentTrackIdRef synchronously)
+      setCurrent(track);
+
+      // 2. Fire stream resolution FIRST (fast path)
+      resolveStream(track, autoplay);
+
+      // 3. Fire lyrics resolution in BACKGROUND (non-blocking)
+      resolveLyrics(track);
+
+      // 4. Prefetch planned-next if we have upcoming tracks (LIVE read)
+      const nextTrack = transportRef.current.upcoming?.[0];
+      if (nextTrack) {
+        prefetchNext(nextTrack);
+      }
+    },
+    [resolveStream, resolveLyrics, prefetchNext, setCurrent]
+  );
+
+  // ========================================================================
+  // RESTORE: Load queue from localStorage on mount
+  // ========================================================================
   useEffect(() => {
     const saved = loadJSON(STORAGE_KEYS.queue, null);
     if (saved && saved.current) {
-      pendingSeekRef.current = Number.isFinite(saved.progress) ? saved.progress : null;
+      pendingSeekRef.current = Number.isFinite(saved.progress)
+        ? saved.progress
+        : null;
       setCurrent(saved.current);
       setUpcoming(Array.isArray(saved.upcoming) ? saved.upcoming : []);
       setPlayed(Array.isArray(saved.played) ? saved.played : []);
       wantPlayRef.current = false;
-      resolveAndPlay(saved.current, false);
+      // Restore triggers stream resolution but NO autoplay (browser policy)
+      resolveStream(saved.current, false);
+      resolveLyrics(saved.current);
     }
     restoredRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- Transport primitives ------------------------------------------------
-
+  // ========================================================================
+  // TRANSPORT PRIMITIVES
+  // ========================================================================
   const toggle = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || !current) return;
     if (isPlaying) {
       audio.pause();
       wantPlayRef.current = false;
-      setIsPlaying(false);
     } else {
-      // Ensure the audio element has a source, then play.
       if (!audio.src && current.streamUrl) audio.src = current.streamUrl;
       if (!audio.src) {
-        // No source yet (still resolving) — kick off resolution + play.
         resolveAndPlay(current, true);
         return;
       }
-      audio.play().catch(() => setIsPlaying(false));
-      setIsPlaying(true);
+      audio.play().catch(() => {});
     }
   }, [isPlaying, current, resolveAndPlay]);
+  toggleRef.current = toggle;
 
-  /** Play a track, treating `contextList` as the active playlist order. */
   const play = useCallback(
     (song, contextList = [song]) => {
       if (!song) return;
@@ -252,55 +428,45 @@ export function PlayerProvider({ children }) {
       }
       const idx = contextList.findIndex((s) => s.id === song.id);
       const i = idx === -1 ? 0 : idx;
+
+      if (streamAbortRef.current) streamAbortRef.current.abort();
+      if (lyricsAbortRef.current) lyricsAbortRef.current.abort();
+
       setCurrent(song);
       setUpcoming(contextList.slice(i + 1));
       setPlayed(contextList.slice(0, i));
-      // Sync synchronously so a rapid next/prev fired before re-render reads
-      // the freshly-started queue instead of the previous snapshot.
+
       transportRef.current = {
         ...transportRef.current,
         current: song,
         upcoming: contextList.slice(i + 1),
         played: contextList.slice(0, i),
       };
-      setIsPlaying(true);
+
       wantPlayRef.current = true;
       addRecentlyPlayed(song);
       resolveAndPlay(song, true);
     },
-    [current, toggle, addRecentlyPlayed, resolveAndPlay]
+    [current, toggle, addRecentlyPlayed, resolveAndPlay, setCurrent]
   );
 
-  /** Advance to the next track, honoring repeat / shuffle. */
   const goNext = useCallback(() => {
-    // Read the freshest queue from transportRef (mirrored every render). We also
-    // re-sync transportRef synchronously below whenever we mutate the queue, so
-    // two rapid skips fired before a re-render still see fresh state instead of
-    // the same stale snapshot (which previously caused "plays previous song").
     const st = transportRef.current;
     const { current, upcoming, played, shuffle, repeat } = st;
     const audio = audioRef.current;
     if (!current) return;
     wantPlayRef.current = true;
 
-    // eslint-disable-next-line no-console
-    console.log("[Swara] goNext entry", {
-      current: current?.trackName,
-      upcoming: upcoming.map((t) => t.trackName),
-      played: played.map((t) => t.trackName),
-      shuffle,
-      repeat,
-    });
+    console.log("[Swara] goNext entry", { current: current?.trackName, shuffle, repeat });
 
-    // Commit a new queue snapshot into transportRef synchronously so the very
-    // next goNext/goPrev call (fired before React re-renders) reads it fresh.
     const commitQueue = (next) => {
       transportRef.current = { ...transportRef.current, ...next };
     };
 
+    if (streamAbortRef.current) streamAbortRef.current.abort();
+    if (lyricsAbortRef.current) lyricsAbortRef.current.abort();
+
     if (repeat === "one") {
-      // eslint-disable-next-line no-console
-      console.log("[Swara] goNext repeat=one, restarting current");
       if (audio) {
         audio.currentTime = 0;
         audio.play().catch(() => {});
@@ -333,8 +499,6 @@ export function PlayerProvider({ children }) {
             ...upcoming.slice(0, idx - played.length),
             ...upcoming.slice(idx - played.length + 1),
           ];
-      // eslint-disable-next-line no-console
-      console.log("[Swara] goNext shuffle pick", pick?.trackName);
       commitQueue({ current: pick, upcoming: newUpcoming, played: newPlayed });
       setCurrent(pick);
       setPlayed(newPlayed);
@@ -345,11 +509,8 @@ export function PlayerProvider({ children }) {
       return;
     }
 
-    // Sequential
     if (upcoming.length > 0) {
       const [next, ...rest] = upcoming;
-      // eslint-disable-next-line no-console
-      console.log("[Swara] goNext sequential pick", next?.trackName);
       commitQueue({ current: next, upcoming: rest, played: [...played, current] });
       setCurrent(next);
       setUpcoming(rest);
@@ -364,8 +525,6 @@ export function PlayerProvider({ children }) {
         return;
       }
       const [first, ...rest] = all;
-      // eslint-disable-next-line no-console
-      console.log("[Swara] goNext repeat=all wrap to", first?.trackName);
       commitQueue({ current: first, upcoming: rest, played: [] });
       setCurrent(first);
       setUpcoming(rest);
@@ -376,33 +535,20 @@ export function PlayerProvider({ children }) {
     } else {
       setIsPlaying(false);
     }
-  }, [addRecentlyPlayed, resolveAndPlay]);
-
-  // Refs for the (stable) ended handler and keyboard shortcut.
-  const toggleRef = useRef(null);
-  toggleRef.current = toggle;
-  const goNextRef = useRef(null);
+  }, [addRecentlyPlayed, resolveAndPlay, setCurrent]);
   goNextRef.current = goNext;
 
-  /** Go back (restart current if >3s in, else previous track). */
   const goPrev = useCallback(() => {
-    // Read freshest queue; re-sync synchronously below on mutation (see goNext).
     const st = transportRef.current;
     const { current, played, upcoming } = st;
     const audio = audioRef.current;
     if (!current) return;
     wantPlayRef.current = true;
 
-    // eslint-disable-next-line no-console
-    console.log("[Swara] goPrev entry", {
-      current: current?.trackName,
-      upcoming: upcoming.map((t) => t.trackName),
-      played: played.map((t) => t.trackName),
-    });
+    if (streamAbortRef.current) streamAbortRef.current.abort();
+    if (lyricsAbortRef.current) lyricsAbortRef.current.abort();
 
     if (audio && audio.currentTime > 3) {
-      // eslint-disable-next-line no-console
-      console.log("[Swara] goPrev restarting current (>3s in)");
       audio.currentTime = 0;
       setProgress(0);
       return;
@@ -411,10 +557,12 @@ export function PlayerProvider({ children }) {
       const prevTrack = played[played.length - 1];
       const newPlayed = played.slice(0, -1);
       const newUpcoming = [current, ...upcoming];
-      // eslint-disable-next-line no-console
-      console.log("[Swara] goPrev pick", prevTrack?.trackName);
-      // Sync immediately so a rapid next/prev sees the fresh queue.
-      transportRef.current = { ...st, current: prevTrack, upcoming: newUpcoming, played: newPlayed };
+      transportRef.current = {
+        ...st,
+        current: prevTrack,
+        upcoming: newUpcoming,
+        played: newPlayed,
+      };
       setPlayed(newPlayed);
       setUpcoming(newUpcoming);
       setCurrent(prevTrack);
@@ -422,20 +570,16 @@ export function PlayerProvider({ children }) {
       setIsPlaying(true);
       resolveAndPlay(prevTrack, true);
     } else if (audio) {
-      // eslint-disable-next-line no-console
-      console.log("[Swara] goPrev no history, restarting current");
       audio.currentTime = 0;
       setProgress(0);
     }
-  }, [addRecentlyPlayed, resolveAndPlay]);
+  }, [addRecentlyPlayed, resolveAndPlay, setCurrent]);
 
-  /** Insert a track right after the current one. */
   const playNext = useCallback((song) => {
     if (!song) return;
     setUpcoming((u) => [song, ...u]);
   }, []);
 
-  /** Append a track to the end of the queue. */
   const addToQueue = useCallback((song) => {
     if (!song) return;
     setUpcoming((u) => [...u, song]);
@@ -449,7 +593,10 @@ export function PlayerProvider({ children }) {
 
   const toggleShuffle = useCallback(() => setShuffleState((s) => !s), []);
   const cycleRepeat = useCallback(
-    () => setRepeatState((r) => REPEAT_CYCLE[(REPEAT_CYCLE.indexOf(r) + 1) % REPEAT_CYCLE.length]),
+    () =>
+      setRepeatState(
+        (r) => REPEAT_CYCLE[(REPEAT_CYCLE.indexOf(r) + 1) % REPEAT_CYCLE.length]
+      ),
     []
   );
   const setVolume = useCallback((v) => setVolumeState(Math.min(1, Math.max(0, v))), []);
@@ -460,12 +607,34 @@ export function PlayerProvider({ children }) {
     setProgress(value);
   }, []);
 
-  // --- Audio element wiring ------------------------------------------------
+  const openQueue = useCallback(() => setQueueOpen(true), []);
+  const closeQueue = useCallback(() => setQueueOpen(false), []);
+  const toggleQueue = useCallback(() => setQueueOpen((o) => !o), []);
+  const openFullscreen = useCallback(() => setFullscreen(true), []);
+  const closeFullscreen = useCallback(() => setFullscreen(false), []);
 
-  // Wire up transport events once.
+  // ========================================================================
+  // AUDIO ELEMENT EVENT BINDINGS — isPlaying MIRRORS <audio> STATE
+  // ========================================================================
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return undefined;
+
+    const onPlay = () => { setIsPlaying(true); setIsBuffering(false); };
+    const onPlaying = () => { setIsPlaying(true); setIsBuffering(false); };
+    const onPause = () => { setIsPlaying(false); setIsBuffering(false); };
+    const onEnded = () => {
+      setIsPlaying(false);
+      setIsBuffering(false);
+      goNextRef.current?.();
+    };
+    const onWaiting = () => { setIsBuffering(true); };
+    const onError = (e) => {
+      console.error("[Swara] audio error:", e);
+      setIsPlaying(false);
+      setIsBuffering(false);
+      setStreamError("upstream");
+    };
     const onTimeUpdate = () => {
       progressRef.current = audio.currentTime;
       setProgress(audio.currentTime);
@@ -482,49 +651,58 @@ export function PlayerProvider({ children }) {
         pendingSeekRef.current = null;
       }
     };
-    const onEnded = () => {
-      // eslint-disable-next-line no-console
-      console.log("[Swara] onEnded fired → goNext (via goNextRef)");
-      goNextRef.current();
-    };
+
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("playing", onPlaying);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("waiting", onWaiting);
+    audio.addEventListener("error", onError);
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("loadedmetadata", onLoadedMeta);
-    audio.addEventListener("ended", onEnded);
+
     return () => {
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("playing", onPlaying);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("waiting", onWaiting);
+      audio.removeEventListener("error", onError);
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("loadedmetadata", onLoadedMeta);
-      audio.removeEventListener("ended", onEnded);
     };
   }, []);
 
-  // Keep the audio element's volume in sync.
   useEffect(() => {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
-  // Persist player preferences.
   useEffect(() => saveJSON(STORAGE_KEYS.volume, volume), [volume]);
   useEffect(() => saveJSON(STORAGE_KEYS.shuffle, String(shuffle)), [shuffle]);
   useEffect(() => saveJSON(STORAGE_KEYS.repeat, repeat), [repeat]);
 
-  // Persist the queue (best effort) whenever it changes — gated until the
-  // initial restore has run so we never overwrite storage with an empty queue.
   useEffect(() => {
     if (!restoredRef.current) return;
-    saveJSON(STORAGE_KEYS.queue, { current, upcoming, played, progress: progressRef.current });
+    saveJSON(STORAGE_KEYS.queue, {
+      current,
+      upcoming,
+      played,
+      progress: progressRef.current,
+    });
   }, [current, upcoming, played]);
 
-  // Capture the latest position on unload (progress ticks are too frequent to
-  // persist on every change).
   useEffect(() => {
     const onUnload = () =>
-      saveJSON(STORAGE_KEYS.queue, { current, upcoming, played, progress: progressRef.current });
+      saveJSON(STORAGE_KEYS.queue, {
+        current,
+        upcoming,
+        played,
+        progress: progressRef.current,
+      });
     window.addEventListener("beforeunload", onUnload);
     return () => window.removeEventListener("beforeunload", onUnload);
   }, [current, upcoming, played]);
 
-  // Space = play/pause, but skip when a field/control is focused so its
-  // native Space activation wins (avoids double-toggling).
   useEffect(() => {
     const onKey = (e) => {
       if (e.code !== "Space") return;
@@ -539,52 +717,71 @@ export function PlayerProvider({ children }) {
       )
         return;
       e.preventDefault();
-      toggleRef.current();
+      toggleRef.current?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const value = {
-    current,
-    upcoming,
-    played,
-    isPlaying,
-    progress,
-    duration,
-    volume,
-    shuffle,
-    repeat,
-    queueOpen,
-    fullscreen,
-    // async stream resolution
-    isResolvingStream,
-    streamError,
-    lyrics,
-    lyricsStatus,
-    play,
-    toggle,
-    next: goNext,
-    prev: goPrev,
-    playNext,
-    addToQueue,
-    removeFromQueue,
-    clearQueue,
-    toggleShuffle,
-    cycleRepeat,
-    setVolume,
-    seek,
-    openQueue: () => setQueueOpen(true),
-    closeQueue: () => setQueueOpen(false),
-    toggleQueue: () => setQueueOpen((o) => !o),
-    openFullscreen: () => setFullscreen(true),
-    closeFullscreen: () => setFullscreen(false),
-  };
+  // ========================================================================
+  // MEMOIZED CONTEXT VALUE — prevents tree-wide re-renders on progress ticks.
+  // Only rebuilds when a listed dependency actually changes reference.
+  // ========================================================================
+  const value = useMemo(
+    () => ({
+      current,
+      upcoming,
+      played,
+      isPlaying,
+      isBuffering,
+      progress,
+      duration,
+      volume,
+      shuffle,
+      repeat,
+      queueOpen,
+      fullscreen,
+      isResolvingStream,
+      streamError,
+      lyrics,
+      lyricsStatus,
+      play,
+      toggle,
+      next: goNext,
+      prev: goPrev,
+      playNext,
+      addToQueue,
+      removeFromQueue,
+      clearQueue,
+      toggleShuffle,
+      cycleRepeat,
+      setVolume,
+      seek,
+      openQueue,
+      closeQueue,
+      toggleQueue,
+      openFullscreen,
+      closeFullscreen,
+    }),
+    [
+      current, upcoming, played,
+      isPlaying, isBuffering, progress, duration,
+      volume, shuffle, repeat,
+      queueOpen, fullscreen,
+      isResolvingStream, streamError,
+      lyrics, lyricsStatus,
+      play, toggle, goNext, goPrev,
+      playNext, addToQueue, removeFromQueue, clearQueue,
+      toggleShuffle, cycleRepeat,
+      setVolume, seek,
+      openQueue, closeQueue, toggleQueue,
+      openFullscreen, closeFullscreen,
+    ]
+  );
 
   return (
     <PlayerContext.Provider value={value}>
       {children}
-      {/* The single shared audio element for full-length streams. */}
       <audio ref={audioRef} preload="none" crossOrigin="anonymous" />
     </PlayerContext.Provider>
   );

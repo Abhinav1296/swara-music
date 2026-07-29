@@ -10,7 +10,8 @@ stateful part of the app — read it carefully before changing playback.
 current:  Song | null      // track playing now
 upcoming: Song[]           // queued after current (Play Next inserts here)
 played:   Song[]           // history before current (for prev / shuffle pool)
-isPlaying: boolean
+isPlaying: boolean         // STRICTLY mirrors <audio> element state via event listeners
+isBuffering: boolean       // true when audio is waiting for data (waiting/playing events)
 progress:  number          // seconds (UI display)
 duration:  number          // seconds (UI display)
 volume:   number           // 0..1 (persisted)
@@ -19,8 +20,8 @@ repeat:   "off" | "all" | "one"   // persisted
 queueOpen: boolean         // QueuePanel visibility
 fullscreen: boolean        // FullScreenPlayer visibility
 
-// Async stream resolution (post-Lyrica)
-isResolvingStream: boolean // true while /api/song-details is in flight
+// Async stream resolution (stream-first architecture)
+isResolvingStream: boolean // true while /api/stream is in flight
 streamError: null | "no_stream" | "not_found" | "upstream"
 lyrics:   { kind, lines, plain, source } | null  // resolved synced/plain lyrics
 lyricsStatus: "idle" | "loading" | "available" | "unavailable"
@@ -70,31 +71,154 @@ goPrev():
 ### On track end (`ended` event)
 `goNext()` is called via `goNextRef.current()` so it always sees fresh state.
 
-## Async stream resolution (the key change)
+## Stream-First Architecture (NEW)
 
-Playback no longer uses 30s iTunes previews. On every play (and on `goNext` /
-`goPrev` / restore), `resolveAndPlay(track, autoplay)` runs:
+This phase moves Swara to a **stream-first, lyrics-later** model. The key principle:
+**audio must never wait on lyrics or metadata**. The `<audio>` element state is the
+single source of truth for `isPlaying`/`isBuffering`.
 
-1. Optimistically set `current` to the clicked track's metadata (title/art show
-   instantly) and `isResolvingStream = true`.
-2. `GET /api/song-details?artist=<artist>&song=<title>` (passing `jiosaavnUrl`
-   when the search result carried one, to skip a JioSaavn search hop).
-3. On success: merge the resolved `streamUrl` / `artwork` / `durationMs` /
-   `hasFullStream` into `current` (preserving `current.id`), store the normalized
-   `lyrics` + `lyricsStatus`, set `audio.src = streamUrl`, and (if the user
-   intended to play) `audio.play()`.
-4. On no stream: set `streamError = "no_stream"`, do not play, keep queue intact.
-5. On failure (404/502/504): set `streamError` (`"not_found"` / `"upstream"`),
-   clear `lyricsStatus`, do not crash the queue.
+### Flow: Play → Resolve Stream → Play Audio → (Background) Resolve Lyrics → Merge
+
+```
+User clicks track
+      │
+      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 1. IMMEDIATELY set `current` = user-picked track metadata   │
+│    (optimistic UI — art/title/artist show instantly from    │
+│    search results, no flash)                                 │
+└─────────────────────────────────────────────────────────────┘
+      │
+      ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 2. FIRE /api/stream (fast, stream-only) with AbortController│
+│    • Returns: { status, stream_url, artist, title, album,   │
+│      artwork, durationMs, source }                           │
+│    • Timeout budget: <4s p95, hard 10s                       │
+│    • 504/502 → retry once after 1.5–2.5s                     │
+│    • 404/not_found → auto-skip if upcoming has items         │
+└─────────────────────────────────────────────────────────────┘
+      │
+      ▼ (when stream_url arrives)
+┌─────────────────────────────────────────────────────────────┐
+│ 3. Set audio.src = stream_url                               │
+│    audio.load()                                              │
+│    if (autoplay && wantPlayRef.current) audio.play()        │
+│    Merge ONLY safe fields into `current`:                   │
+│      • streamUrl, durationMs, hasFullStream                  │
+│    NEVER overwrite: title, artist, artwork (user's selection)│
+└─────────────────────────────────────────────────────────────┘
+      │
+      ▼ IMMEDIATELY (non-blocking)
+┌─────────────────────────────────────────────────────────────┐
+│ 4. FIRE /api/song-details in BACKGROUND (separate AbortCtrl)│
+│    • Returns full SongDetails: lyrics, mood, metadata       │
+│    • On success: merge lyrics/mood/metadata into `current`  │
+│      and `lyrics` state                                     │
+│    • On failure: lyricsStatus = "unavailable", audio UNTOUCHED│
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Audio Event Bindings — `isPlaying` Mirrors `<audio>` Exactly
+
+`isPlaying` and `isBuffering` are **derived from native audio events**, never set
+speculatively:
+
+| Event        | `isPlaying` | `isBuffering` |
+|--------------|-------------|---------------|
+| `play`       | `true`      | `false`       |
+| `playing`    | `true`      | `false`       |
+| `pause`      | `false`     | `false`       |
+| `ended`      | `false`     | `false`       |
+| `waiting`    | unchanged   | `true`        |
+| `error`      | `false`     | `false`       |
+
+This guarantees the play/pause icon **can never desync** from actual audio state
+(tab switch, autoplay block, output device unplugged, etc.).
+
+### Skip (Next/Prev)
+
+- Abort in-flight stream + lyrics requests for the previous track (`AbortController.abort()`)
+- Start the same stream-first flow for the new track
+- Token guards (`resolveTokenRef`) ignore stale responses after new resolves begin
+
+### Prefetch Planned-Next (Stream-Only)
+
+- Prefetch ONLY via `/api/stream` (fast). **Never prefetch lyrics.**
+- Store result in `prefetchCacheRef` keyed by stable `artist|title`
+- **Never mutate `current` from prefetch**
+- On actual `goNext()`, if prefetched `stream_url` exists, use it instantly
+
+### Retry / Auto-Skip Rules (Scoped to `/api/stream`)
+
+| Condition          | Action                                    |
+|--------------------|-------------------------------------------|
+| 504 / timeout      | Retry once after 1.5–2.5s                 |
+| 502 / upstream     | Retry once after 1.5–2.5s                 |
+| 404 / not_found    | Auto-skip if `upcoming.length > 0`        |
+| Any failure        | Never corrupt queue; show glass error + Retry only if truly stuck |
+
+### `isBuffering` Derived State
+
+Exposed via `usePlayer()` for UI spinners. True during `waiting`, false on
+`playing`/`canplay`. The mini bar and full-screen player can show a subtle
+buffering indicator without ever blocking on lyrics.
+
+## Async stream resolution (stream-first architecture)
+
+Playback uses **stream-first, lyrics-later** architecture. On every play (and on
+`goNext` / `goPrev` / restore):
+
+1. **Optimistic UI**: immediately set `current` to the clicked track's metadata
+   (title/artist/artwork from search result show instantly) and
+   `isResolvingStream = true`.
+2. **Fast stream resolution**: fire `GET /api/stream?artist=...&song=...` FIRST
+   (with `AbortController`). This endpoint returns ONLY `stream_url` + minimal
+   metadata (artist, title, album, artwork, durationMs) — no lyrics, no mood.
+   Target: <4s p95.
+3. **On `stream_url` arrival**:
+   - Set `audio.src = stream_url`
+   - Call `audio.play()` if user intended to play
+   - Merge ONLY safe fields into `current`: `streamUrl`, `durationMs`,
+     `hasFullStream`. **Never overwrite** `title`, `artist`, `artwork`,
+     `album` from the user's original selection.
+4. **IMMEDIATELY after starting stream**, fire `GET /api/song-details` in the
+   background (separate `AbortController`) for lyrics/mood/rich metadata.
+   - When it returns: attach lyrics/mood/metadata to `current` and `lyrics` state.
+   - If it fails: `lyricsStatus = "unavailable"`, do not touch audio.
+   - Do NOT overwrite `title`/`artist`/`artwork` with potentially mismatched values.
+5. **Error handling** (scoped to `/api/stream`):
+   - 504/timeout → retry once after ~1.5–2.5s
+   - 404/not_found → auto-skip if `upcoming` has items; otherwise show glass error + Retry
+   - Never corrupt queue on failure.
 
 Resilience details:
 - **Dedupe**: identical in-flight resolves (same `artist|title`) are reused.
 - **Stale guard**: a token is bumped on each new resolve; late responses for a
-  superseded track are ignored (so skipping quickly never applies a stale src).
-- **Pause during resolve**: a `wantPlayRef` flag means a quick pause while the
-  request is in flight is respected (the track won't auto-start on arrival).
+  superseded track are ignored (rapid skips never apply stale src).
+- **Pause during resolve**: `wantPlayRef` flag means a quick pause while the
+  request is in flight is respected (track won't auto-start on arrival).
 - The `<audio>` element uses `crossOrigin="anonymous"` so the CDN stream can be
   analysed if needed; playback itself needs no CORS.
+
+## Audio-event-bound UI state (critical)
+
+`isPlaying` and `isBuffering` **strictly mirror the `<audio>` element** via
+event listeners — they can never desync from reality.
+
+Event bindings (wired once in `useEffect`):
+- `play` → `isPlaying = true`, `isBuffering = false`
+- `playing` → `isPlaying = true`, `isBuffering = false`
+- `pause` → `isPlaying = false`, `isBuffering = false`
+- `ended` → `isPlaying = false`, `isBuffering = false` → calls `goNext()`
+- `waiting` → `isBuffering = true` (stalled for data)
+- `error` → `isPlaying = false`, `isBuffering = false`, `streamError = "upstream"`
+
+This means:
+- The play/pause icon in NowPlayingBar and FullScreenPlayer **always** reflects
+  the true audio state (test: unplug headphones mid-play, switch tabs, hit
+  autoplay block).
+- `isBuffering` drives any spinner/loading indicator during rebuffer.
 
 ## play / pause / seek / volume
 

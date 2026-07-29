@@ -1,12 +1,10 @@
-import { useEffect, useState } from "react";
-import { motion } from "framer-motion";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
 import { useRouter } from "../context/RouterContext";
-import { getShelf, getTrending, searchSongs } from "../api/client";
+import { getTrending } from "../api/client";
 import Section from "./Section";
 import ArtistCard from "./ArtistCard";
-import SkeletonCard from "./SkeletonCard";
 
 // Curated Telugu moods → search queries. Each becomes a horizontal shelf.
 const MOOD_SECTIONS = [
@@ -16,8 +14,8 @@ const MOOD_SECTIONS = [
   { title: "Melodies", query: "telugu melody songs" },
 ];
 
-// Artists surfaced as tappable circular cards.
-const ARTIST_NAMES = [
+// Preferred order of artists to surface when derivable from shelves.
+const PREFERRED_ARTISTS = [
   "Sid Sriram",
   "Anirudh Ravichander",
   "Anurag Kulkarni",
@@ -28,55 +26,73 @@ const ARTIST_NAMES = [
 ];
 
 /**
- * Home: a premium gradient hero (featured track) followed by several
- * horizontal shelves — Trending, mood-based sections, and Popular Artists.
+ * Home: gradient hero (featured track) + horizontal shelves.
+ * NOTE: We no longer fanout /api/search for each artist. Popular Artists
+ * are derived from the tracks already fetched by shelves.
  */
 export default function HomeView() {
   const { current, isPlaying, play } = usePlayer();
   const { navigate } = useRouter();
 
   const [trending, setTrending] = useState([]);
-  const [artists, setArtists] = useState([]);
-  const [artistsLoading, setArtistsLoading] = useState(true);
+  const [shelfSongs, setShelfSongs] = useState([]); // accumulated tracks from mood shelves
 
-  // Trending powers both the hero and the first shelf.
+  // Trending powers both hero and the first shelf
   useEffect(() => {
     let active = true;
     getTrending(20)
-      .then((d) => active && setTrending(d.results))
+      .then((d) => active && setTrending(d?.results || []))
       .catch(() => active && setTrending([]));
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, []);
 
-  // Resolve featured artists into cards (grab each artist's top song for art/id).
-  useEffect(() => {
-    let active = true;
-    setArtistsLoading(true);
-    Promise.all(
-      ARTIST_NAMES.map((name) =>
-        searchSongs(name, 1)
-          .then((d) => d.results[0])
-          .catch(() => null)
-      )
-    )
-      .then((songs) => {
-        if (!active) return;
-        const resolved = songs
-          .filter(Boolean)
-          .map((s) => ({
-            id: s.id,
-            name: s.artistName,
-            artwork: s.artworkUrl600 || s.artworkUrl100,
-          }));
-        setArtists(resolved);
-      })
-      .finally(() => active && setArtistsLoading(false));
-    return () => {
-      active = false;
-    };
+  // Stable callback for Section to report its fetched songs (avoids refetch loops)
+  const addTracks = useCallback((tracks) => {
+    if (!Array.isArray(tracks) || tracks.length === 0) return;
+    setShelfSongs((prev) => {
+      // dedupe by id
+      const seen = new Set(prev.map((t) => t?.id).filter(Boolean));
+      const merged = [...prev];
+      for (const t of tracks) {
+        if (t && t.id && !seen.has(t.id)) {
+          seen.add(t.id);
+          merged.push(t);
+        }
+      }
+      return merged;
+    });
   }, []);
+
+  // Derive Popular Artists from all fetched tracks
+  const derivedArtists = useMemo(() => {
+    const pool = [...trending, ...shelfSongs].filter(Boolean);
+    if (pool.length === 0) return [];
+
+    // group by artistName -> pick best artwork
+    const byArtist = new Map();
+    for (const s of pool) {
+      const name = (s?.artistName || "").trim();
+      if (!name) continue;
+      const artwork = s?.artworkUrl600 || s?.artworkUrl100 || "";
+      const prev = byArtist.get(name);
+      if (!prev) {
+        byArtist.set(name, { id: `artist:${name}`, name, artwork });
+      } else if (!prev.artwork && artwork) {
+        prev.artwork = artwork;
+      }
+    }
+
+    // sort: preferred order first, others after
+    const order = new Map(PREFERRED_ARTISTS.map((n, i) => [n, i]));
+    const arr = Array.from(byArtist.values());
+    arr.sort((a, b) => {
+      const ai = order.has(a.name) ? order.get(a.name) : 999;
+      const bi = order.has(b.name) ? order.get(b.name) : 999;
+      return ai - bi;
+    });
+
+    return arr.slice(0, 12);
+  }, [trending, shelfSongs]);
 
   const featured = trending[0];
   const featuredPlaying = featured && current?.id === featured.id && isPlaying;
@@ -122,6 +138,8 @@ export default function HomeView() {
         title="Trending Telugu"
         songs={trending}
         onSeeAll={() => navigate("search", { q: "telugu hits" })}
+        onFetched={addTracks}
+        fetchKey="trending-preloaded"
       />
 
       {/* Mood / vibe shelves */}
@@ -129,25 +147,26 @@ export default function HomeView() {
         <Section
           key={s.query}
           title={s.title}
-          fetch={() => getShelf(s.query, 20)}
+          fetchKey={s.query}
           onSeeAll={() => navigate("search", { q: s.query })}
+          onFetched={addTracks}
         />
       ))}
 
-      {/* Popular Artists */}
+      {/* Popular Artists (derived from shelves) */}
       <section className="mb-8">
         <div className="mb-3 px-1">
           <h2 className="text-xl font-bold tracking-tight text-white">Popular Artists</h2>
         </div>
         <div className="no-scrollbar flex snap-x gap-4 overflow-x-auto scroll-smooth pb-2">
-          {artistsLoading
-            ? ARTIST_NAMES.map((_, i) => (
+          {derivedArtists.length === 0
+            ? Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} className="flex w-40 shrink-0 flex-col items-center gap-3">
                   <div className="h-40 w-40 animate-pulse rounded-full bg-white/5" />
                   <div className="h-3 w-24 animate-pulse rounded bg-white/5" />
                 </div>
               ))
-            : artists.map((a) => <ArtistCard key={a.id} artist={a} />)}
+            : derivedArtists.map((a) => <ArtistCard key={a.id} artist={a} />)}
         </div>
       </section>
     </div>

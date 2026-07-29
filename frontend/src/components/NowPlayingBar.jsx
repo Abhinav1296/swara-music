@@ -56,6 +56,12 @@ export default function NowPlayingBar() {
     }
   };
 
+  // Only show "Resolving full song..." when we are ACTIVELY resolving AND
+  // audio hasn't started yet. Once isPlaying flips true (or streamUrl exists
+  // and progress > 0), audio is live so the message is misleading.
+  const showResolving =
+    isResolvingStream && !isPlaying && !(current?.streamUrl && progress > 0);
+
   return (
     <div className="glass fixed bottom-16 left-0 right-0 z-30 flex items-center gap-3 border-t px-3 py-2 md:bottom-0 md:gap-4 md:px-6 md:py-3">
       {/* Mobile thin progress line */}
@@ -94,12 +100,16 @@ export default function NowPlayingBar() {
               <p className="truncate text-xs text-white/50" title={current.artistName}>
                 {current.artistName}
               </p>
-              {isResolvingStream && (
+              {showResolving && (
                 <p className="truncate text-[11px] text-accent/90">Resolving full song…</p>
               )}
-              {!isResolvingStream && streamError && (
+              {!showResolving && streamError && !isPlaying && (
                 <p className="truncate text-[11px] text-white/40">
-                  {streamError === "no_stream" ? "Stream unavailable" : "Playback error"}
+                  {streamError === "no_stream" || streamError === "not_found"
+                    ? "Stream unavailable"
+                    : streamError === "rate_limited"
+                    ? "Rate limited — retrying…"
+                    : "Playback error"}
                 </p>
               )}
             </button>

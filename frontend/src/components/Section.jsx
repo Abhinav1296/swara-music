@@ -2,17 +2,34 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import SongCard from "./SongCard";
 import SkeletonCard from "./SkeletonCard";
+import { getTrending, getShelf } from "../api/client";
 
 /**
  * A horizontally-scrolling, snap-based shelf of song cards with an Apple
  * Music–style header ("Title" + See All + scroll arrows). Fetches its own
- * data when a `fetch` fn is provided; otherwise renders `songs` directly
+ * data when a `fetchKey` string is provided; otherwise renders `songs` directly
  * (useful to share data already loaded by the parent).
+ *
+ * fetchKey values (stable strings, never inline functions):
+ * - "trending-preloaded"  -> uses preloaded data from parent (provided prop)
+ * - "latest telugu songs" -> getTrending
+ * - "telugu romantic songs" -> getShelf
+ * - "telugu mass songs" -> getShelf
+ * - "telugu melody songs" -> getShelf
  */
-export default function Section({ title, fetch, songs: provided, onSeeAll }) {
+export default function Section({ title, fetchKey, songs: provided, onSeeAll, onFetched }) {
   const [songs, setSongs] = useState(provided || []);
-  const [loading, setLoading] = useState(!provided);
+  const [loading, setLoading] = useState(!provided && !!fetchKey);
   const scrollerRef = useRef(null);
+
+  // Internal fetch logic keyed by stable fetchKey string
+  const doFetch = useRef(async () => {
+    if (!fetchKey) return [];
+    if (fetchKey === "trending-preloaded") return []; // parent provides data
+    if (fetchKey === "latest telugu songs") return getTrending(20);
+    // Mood shelves
+    return getShelf(fetchKey, 20);
+  }).current;
 
   useEffect(() => {
     if (provided) {
@@ -20,17 +37,23 @@ export default function Section({ title, fetch, songs: provided, onSeeAll }) {
       setLoading(false);
       return undefined;
     }
-    if (!fetch) return undefined;
+    if (!fetchKey) return undefined;
     let active = true;
     setLoading(true);
-    fetch()
-      .then((d) => active && setSongs(d?.results || []))
+    doFetch()
+      .then((d) => {
+        const results = d?.results || [];
+        if (active) {
+          setSongs(results);
+          if (onFetched) onFetched(results);
+        }
+      })
       .catch(() => active && setSongs([]))
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [fetch, provided]);
+  }, [fetchKey, provided, onFetched]);
 
   const scroll = (dir) => {
     const el = scrollerRef.current;

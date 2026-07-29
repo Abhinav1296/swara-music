@@ -90,17 +90,20 @@ mostly presentational. `FullScreenPlayer`, `PlaylistView`, `TrackMenu`,
 
 ## Highest-value next tasks (suggested, not started)
 
-1. **Personalized / cached Home** — reduce the ~8 cold-load requests (cache
-   searches, memoize Popular Artists) and consider lightweight "because you
-   liked" shelves built from local likes (no backend needed).
-2. **Playlist quality-of-life** — reorder tracks (drag), duplicate-song
+1. **Video mode** — add a "Video" tab in FullScreenPlayer that opens the YouTube
+   result (from `externalLinks.youtube`) in an embedded player or modal. Keep
+   audio as primary; video is opt-in.
+2. **Home recommendations** — reduce the ~8 cold-load requests (cache searches,
+   memoize Popular Artists) and build lightweight "because you liked" shelves
+   from local likes (no backend needed).
+3. **Playlist quality-of-life** — reorder tracks (drag), duplicate-song
    indicators, and a "playlist from Liked" shortcut. Keep localStorage model.
-3. **Accessibility & keyboard nav** — focus management in modals/menus,
+4. **Accessibility & keyboard nav** — focus management in modals/menus,
    `aria` improvements, visible focus rings; currently Space/keys are partially
    handled.
-4. **Resilient storage** — add a tiny versioned migration for `swara:*` keys so
+5. **Resilient storage** — add a tiny versioned migration for `swara:*` keys so
    future schema changes don't read stale data.
-5. **Artist / Album deep links — DONE** — browsing now navigates by
+6. **Artist / Album deep links — DONE** — browsing now navigates by
    `artistName` / `collectionName` (Lyrica/JioSaavn have no ids). `/api/lookup`
    gained `type=artist|album` and resolves by name; `DetailView`, `TrackMenu`,
    `SongCard`, `TrackRow`, and `ArtistCard` all navigate by name. URLs are
@@ -108,9 +111,20 @@ mostly presentational. `FullScreenPlayer`, `PlaylistView`, `TrackMenu`,
    Residual: album links are best-effort (only when JioSaavn returns album
    metadata); artist pages are a filtered JioSaavn search, not a canonical
    discography. See KNOWN_LIMITATIONS.md.
-6. **Real lyrics provider — DONE** — lyrics now come from Lyrica/LRCLib on every
+7. **Real lyrics provider — DONE** — lyrics now come from Lyrica/LRCLib on every
    play (synced + plain), rendered in the full-screen Lyrics tab. `demoLyrics` is
    no longer the primary path; keep it only as a future fallback.
+
+### ✅ Phase 4 COMPLETE — Stream-First Architecture (this session)
+- Added `/api/stream` endpoint (fast, stream-only, <4s p95 target)
+- Refactored `PlayerContext.jsx` to stream-first: `/api/stream` fires first,
+  audio starts immediately, `/api/song-details` runs in background for lyrics
+- `isPlaying` now strictly mirrors `<audio>` element via event listeners
+  (play, playing, pause, ended, waiting, error) — can never desync
+- Prefetch planned-next uses ONLY `/api/stream` (stored in `prefetchCacheRef`)
+- Retry/auto-skip scoped to `/api/stream`: 504→retry once; 404→auto-skip if queue has items
+- Album art switches instantly on play (optimistic from search result); never waits on lyrics
+- All existing features preserved: queue, likes, playlists, recents, shuffle, repeat, restore
 
 Avoid these unless asked: full-track playback (impossible on free API), accounts
 /sync (changes the whole architecture), and swapping the music provider.

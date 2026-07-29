@@ -82,6 +82,23 @@ ids). Powers the artist/album detail views.
   `"<album> <artist>"`) and keeps tracks whose album matches `name`. Both return
   a `LookupResponse` (`type`, `title`, `artworkUrl600`, `results`).
 
+### `GET /api/stream`
+**Lightweight stream-only endpoint** — returns ONLY the stream URL + minimal
+metadata needed to start playback immediately. Does NOT fetch lyrics, mood, or
+rich metadata. Designed for sub-4s p95 latency.
+- Query params:
+  - `artist` **(required)** `string`
+  - `song` **(required)** `string` — also aliased by `title` / `track`
+  - `url` `string` (optional) — a JioSaavn `perma_url` for fast stream resolution
+- Response: `StreamResponse` (see schema below).
+- Behavior:
+  1. If `url` provided, resolves stream directly via Lyrica `/api/jiosaavn/play`.
+  2. Otherwise searches JioSaavn for "artist song" and uses top match.
+  3. Best-effort enrichment: fetches artwork, album, duration from JioSaavn
+     search result (never fails the response).
+- Never returns HTTP 500 for "not found" — returns 404 with `status: "not_found"`.
+- Errors: 504 (upstream timeout), 502 (upstream error), 422 (missing params).
+
 ## Response schemas
 
 ### `SearchResponse` / `Song` (per result)
@@ -146,6 +163,23 @@ adapter converts these to `{ time, text }` (seconds) for the karaoke highlight.
 ```json
 { "type": "artist", "title": "Sid Sriram", "artworkUrl600": "...", "results": [ /* Song[] */ ] }
 ```
+
+### `StreamResponse`
+```json
+{
+  "status": "success",
+  "stream_url": "https://c.saavncdn.com/.../stream.mp4",
+  "artist": "Sid Sriram",
+  "title": "Samajavaragamana",
+  "album": "Ala Vaikunthapurramuloo",
+  "artwork": "https://c.saavncdn.com/.../500x500.jpg",
+  "durationMs": 219000,
+  "source": "lyrica"
+}
+```
+`status` is one of `"success" | "not_found" | "error"`. On 404, the response body
+includes `status: "not_found"` with null `stream_url` — the frontend treats this
+as an auto-skip trigger when `upcoming` has items.
 
 ## Telugu bias (`services/lyrica.py::normalize_query`)
 - Empty query → `"telugu"`.
