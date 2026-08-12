@@ -1,9 +1,10 @@
-import { Home, Library, Search } from "lucide-react";
+import { Disc3, Home, Library, Search } from "lucide-react";
 import { useRouter } from "../context/RouterContext";
 
 const ITEMS = [
   { id: "home", label: "Home", icon: Home },
   { id: "search", label: "Search", icon: Search },
+  { id: "albums", label: "Albums", icon: Disc3 },
   { id: "library", label: "Library", icon: Library },
 ];
 

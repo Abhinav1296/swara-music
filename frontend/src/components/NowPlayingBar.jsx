@@ -178,7 +178,10 @@ export default function NowPlayingBar() {
             onChange={(e) => seek(Number(e.target.value))}
             disabled={!current}
             aria-label="Seek preview"
-            className="h-1 w-full flex-1 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent disabled:cursor-not-allowed disabled:opacity-40"
+            className="h-1 w-full flex-1 cursor-pointer appearance-none rounded-full disabled:cursor-not-allowed disabled:opacity-40"
+            style={{
+              background: `linear-gradient(to right, #fa233b ${pct}%, rgba(255,255,255,0.18) ${pct}%)`,
+            }}
           />
           <span className="w-10 text-[11px] tabular-nums text-white/40">
             {formatTime(duration)}
@@ -227,7 +230,10 @@ export default function NowPlayingBar() {
             value={volume}
             onChange={(e) => setVolume(Number(e.target.value))}
             aria-label="Volume"
-            className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent"
+            className="h-1 w-20 cursor-pointer appearance-none rounded-full"
+            style={{
+              background: `linear-gradient(to right, #fff ${Math.round((volume ?? 0) * 100)}%, rgba(255,255,255,0.18) ${Math.round((volume ?? 0) * 100)}%)`,
+            }}
           />
         </div>
 

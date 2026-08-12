@@ -1,29 +1,65 @@
-# Swara — Telugu Apple Music Clone
+# Swara — a Telugu-only music app
 
-An Apple Music–style player focused **only on Telugu music**. Iterative build;
-this first session delivers the full foundation, and the backend has since been
-migrated to a **Lyrica + JioSaavn** proxy (full-track streaming + real lyrics),
-replacing the old iTunes Search API.
+An Apple Music–style player focused **exclusively on Telugu music**, with lyrics
+at the center. Swara owns its whole stack: it scrapes and cleans its own catalog,
+stores it in MongoDB, resolves audio itself, and never depends on a third-party
+music API at play time.
+
+**Guiding principle — purity over coverage.** A song enters the catalog only when
+there is *hard evidence* it is Telugu (a `telugu` language tag, Telugu script, or
+proven Telugu lyrics). Songs of uncertain language are quarantined and never shown
+until proven — never guessed in. See [Purity model](#purity-model).
+
+---
+
+## Architecture — decouple scrape from serve
+
+The old design did all its scraping *during* playback (three hops through other
+people's free infra). Swara now splits that into two independent journeys:
+
+```
+Journey 1 — Scraper (runs ahead of time, offline)
+  JioSaavn search ─▶ clean / version / dedupe ─▶ fetch Telugu lyrics ─▶ MongoDB
+
+Journey 2 — App (live, one step)
+  React ─▶ FastAPI ─▶ read record from MongoDB (~50ms) ─▶ resolve fresh audio locally ─▶ play
+```
+
+The only live step at play time is resolving a fresh audio URL, which Swara does
+**itself** (local DES decrypt of JioSaavn's `encrypted_media_url`) — no external
+music-API proxy.
 
 ## Stack
-- **Backend:** Python + FastAPI — a clean, Telugu-biased proxy in front of a
-  personal **Lyrica** instance (LRCLib/MusicBrainz lyrics + JioSaavn audio). No
-  API key required.
-- **Frontend:** React + Vite + Tailwind CSS + Framer Motion — an Apple Music
-  look with heavy glassmorphism, dark by default.
+
+- **Scraper:** Python package (`scraper/`) — independent JioSaavn client, lyric
+  adapters, a Wikidata-backed Telugu-films reference, and the quarantine pipeline.
+- **Database:** MongoDB Atlas (`swara.songs` + `swara.quarantine`). The song
+  fingerprint *is* the Mongo `_id`, so dedup is free.
+- **Backend:** Python + FastAPI (`backend/`) — reads from MongoDB and resolves
+  audio locally. No API key, no proxy.
+- **Frontend:** React + Vite + Tailwind CSS + Framer Motion (`frontend/`) — an
+  Apple Music look with glassmorphism, full-screen player, synced lyrics, custom
+  playlists, and URL routing.
 
 ## Layout
+
 ```
 .
-├── backend/      FastAPI app (Lyrica/JioSaavn proxy: search, trending,
-│                 song-details, lookup, health)
-└── frontend/     React + Vite app (UI, player, glass components)
+├── scraper/      catalog pipeline: JioSaavn client, lyrics, quarantine machine
+├── backend/      FastAPI app (Mongo-backed catalog + local audio resolver)
+├── frontend/     React + Vite app (UI, player, lyrics, playlists)
+└── output.json   code-graph snapshot of the whole project (reference)
 ```
 
-## Quick start
+---
+
+## Quick start — run the app
+
+The backend needs `scraper/.env` with a `MONGODB_URI` (Atlas connection string;
+`.env.example` is committed as a template). Then:
 
 ```bash
-# Terminal 1 — backend
+# Terminal 1 — backend (serves the pre-built catalog from MongoDB)
 cd backend
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
@@ -36,51 +72,79 @@ npm install
 npm run dev                        # http://localhost:5173
 ```
 
-The frontend dev server proxies `/api` → `http://localhost:8000`, so no CORS
-or hard-coded URLs are needed in app code.
+The frontend dev server proxies `/api` → `http://localhost:8000` (no CORS or
+hard-coded URLs in app code). The first `/api/search` builds a MongoDB text index
+once (a few seconds).
 
-## What works (Phase 1)
-- Search Telugu songs via the backend (`/api/search`).
-- Trending Telugu list on the Home page (`/api/trending`).
-- Apple Music–style layout: glass sidebar, top search bar, content area, and a
-  frosted "Now Playing" bar.
-- Beautiful song cards with hover lift + play button.
+The data source is switchable via `SWARA_SOURCE` (`config.DATA_SOURCE`): default
+`mongo` serves the new catalog; `lyrica` restores the old live proxy.
 
-## What works (Phase 3)
-- **Full-screen Now Playing view** — open from the mini bar (artwork, title, or
-  the expand button). Large blurred-artwork backdrop, glass transport controls,
-  seek + volume, shuffle/repeat, and an in-view "Up Next" list. Smooth
-  spring open/close; Esc or the chevron minimizes back to the mini bar.
-- **Custom Playlists (localStorage)** — create / rename / delete playlists and
-  add/remove songs (via any track's "•••" menu → *Add to Playlist*). The Library
-  shows Liked Songs + your playlists + Recently Played; each playlist has a
-  detail page with Play All / Shuffle.
-- **Persisted queue + current track** — the queue, current song, and position
-  are saved to localStorage and restored on reload (no autoplay; press play to
-  resume from the saved position).
-- **Deep-link / routing** — the app boots from the URL (`/search?q=…`,
-  `/artist?id=…`, `/album?id=…`, `/playlist?id=…`), so refreshes and shared links
-  land on the right view; back/forward remain stable.
-- **UI polish** — premium glass on the full-screen player, empty states for
-  playlists, and consistent design tokens (`bg-white/5-10`, `border-white/10`,
-  `rounded-2xl/3xl`, accent `#fa233b`).
+---
 
-## What works (Lyrica migration)
-- **Full-track streaming** — on every play, `/api/song-details` resolves a real
-  JioSaavn stream URL (not a 30s preview) and the single `<audio>` element plays
-  it. A "Resolving full song…" state shows during resolution.
-- **Real lyrics** — synced/plain lyrics from Lyrica/LRCLib render in the
-  full-screen Lyrics tab (active line highlight + auto-scroll; tap a line to
-  seek). When Lyrica has no lyrics, the player shows a clean "not available"
-  state.
-- See `docs/` (especially `ARCHITECTURE.md`, `API.md`, `PLAYER_SYSTEM.md`,
-  `KNOWN_LIMITATIONS.md`) for the full picture.
+## The scraper — build & grow the catalog
 
-### Known post-migration caveats
-- **Artist / Album deep links work by name**: since Lyrica/JioSaavn have no ids,
-  browsing navigates by `artistName` / `collectionName`. "Go to Artist" /
-  "Go to Album" render from those fields; `/api/lookup?type=artist|album` resolves
-  by name. Album links are best-effort (only when JioSaavn returns album metadata).
-  See `docs/KNOWN_LIMITATIONS.md` / `docs/HANDOFF.md`.
-- The app depends on a reachable Lyrica instance; if it's down or cold-starting,
-  search/song-details may return 5xx and the player degrades gracefully.
+Everything below runs from the backend venv (`python -m scraper.<module>`). Jobs
+are resumable and idempotent — safe to stop and re-run.
+
+**Catalog crawl (breadth):**
+```bash
+python -m scraper.crawl_all         # search JioSaavn across movie/artist queries, fence to Telugu
+```
+
+**Quarantine machine (depth, purity-safe):**
+```bash
+python -m scraper.movies_ref        # 1. build the Telugu-films reference from Wikidata
+python -m scraper.expand_movies     # 2. expand each film → live Telugu / quarantine unknowns
+python -m scraper.promote_quarantine# 3. promote a parked song only if its lyrics prove Telugu
+```
+
+**Lyrics fill:**
+```bash
+python -m scraper.lyrics 300        # fill lyrics for N songs (LyricStape ▸ telugulyrics.com ▸ LRCLib)
+```
+
+**Manual review (for parked songs with no findable lyrics):**
+```bash
+python -m scraper.review_server     # http://localhost:8765 — listen & classify by ear (T/B/F)
+```
+
+**Monitor a running job:**
+```bash
+python -m scraper.monitor           # read-only live progress
+```
+
+### Purity model
+
+Metadata lies, so Swara demands proof before a song goes live:
+
+- **Live now** — language is `telugu`, or the title/movie contains Telugu script
+  (U+0C00–U+0C7F; no other language uses it).
+- **Quarantined** — language is `unknown`/blank *and* the song's album matches a
+  verified Telugu film by name+year. Held aside, never shown, **never deleted** —
+  a later proof can still rescue it.
+- **Promoted from quarantine** — only when its *fetched lyrics* are Telugu script,
+  or a human confirms it by ear. Never on a guess.
+- **Dropped** — an explicit non-Telugu language tag.
+
+Telugu-film **instrumentals / background scores** are kept (music is
+language-neutral); only *foreign vocals* are refused.
+
+---
+
+## Current catalog
+
+- **~33,400 songs**, effectively 100% Telugu (0 foreign contamination).
+- **127 parked** in quarantine (reviewed-foreign, hidden).
+- Lyrics fill is in progress — most of the freshly-crawled catalog is still
+  `pending_lyrics`; the lyric sources fill it incrementally.
+
+## Notes
+
+- **JioSaavn is the identity anchor.** Lyrics are matched *to* the exact recording
+  Swara plays, so a song never shows lyrics from the wrong cut. Different versions
+  (sad / female / lofi) are separate records.
+- **`_id` = SHA1(clean_title | movie | version)[:16]** — duration is a matching
+  signal, not identity.
+- Lyric sources are pluggable ~30-line adapters, onboarded best-first
+  (LyricStape = highest trust). All versions are stored; the highest-trust one is
+  displayed. An LM-Arena-style A/B vote to pick between versions is planned.

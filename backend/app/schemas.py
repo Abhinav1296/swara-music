@@ -43,6 +43,7 @@ class Song(BaseModel):
     title: str
     artist: str
     album: str = ""
+    year: Optional[int] = None
     artwork: str = ""
     durationMs: Optional[int] = None
     streamUrl: Optional[str] = None
@@ -97,8 +98,32 @@ class LookupResponse(BaseModel):
 
     type: str = "artist"
     title: str = ""
+    year: Optional[int] = None
+    subtitle: Optional[str] = None
     artworkUrl600: Optional[str] = None
     results: List[Song] = Field(default_factory=list)
+    source: str = "lyrica"
+
+
+class AlbumCard(BaseModel):
+    """One album in the browse grid — a canonical (movie, year) group."""
+
+    key: str
+    name: str
+    year: Optional[int] = None
+    artworkUrl600: Optional[str] = None
+    count: int = 0
+    singers: Optional[str] = None
+    # Present only for JioSaavn-sourced cards (new releases): the album id used
+    # to expand the card into tracks. None for our own (movie, year) albums.
+    albumId: Optional[str] = None
+
+
+class AlbumsResponse(BaseModel):
+    """Envelope for /api/albums — the browsable movie-album grid."""
+
+    count: int = 0
+    results: List[AlbumCard] = Field(default_factory=list)
     source: str = "lyrica"
 
 

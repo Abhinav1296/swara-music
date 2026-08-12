@@ -105,6 +105,25 @@ export function getShelf(query, limit = 20) {
 }
 
 /**
+ * Browse real movie-albums (deduped by canonical name+year, junk filtered).
+ * Returns { count, results:[{ key, name, year, artworkUrl600, count, singers }] }.
+ * These are album CARDS (not tracks), so we don't run normalizeTrack. Cached
+ * per page for 5 minutes — the album list is effectively static.
+ */
+export function getAlbums({ limit = 48, offset = 0 } = {}) {
+  const key = `albums:${limit}:${offset}`;
+  const cached = _shelfGet(key);
+  if (cached) return Promise.resolve(cached);
+
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return getJson(`/albums?${params.toString()}`).then((d) => {
+    const out = { count: d.count || 0, results: d.results || [] };
+    _shelfSet(key, out);
+    return out;
+  });
+}
+
+/**
  * Resolve a track into a full-length stream + synced/plain lyrics + metadata.
  * Returns the raw backend SongDetails (caller normalizes lyrics/artwork).
  *
@@ -160,15 +179,36 @@ export async function getStream({ artist, song, url, signal } = {}) {
 }
 
 /**
- * Resolve an artist or album page by name. Lyrica/JioSaavn have no id lookup,
- * so we resolve by `name` (and, for albums, an optional `artist` hint).
- *
- * @param {{ name:string, type?:'artist'|'album', artist?:string, limit?:number }} opts
+ * Fresh Telugu album cards (true New Releases, live from JioSaavn, daily-cached).
+ * Returns { count, results:[{ albumId, name, year, artworkUrl600, count }] }.
+ * These are album CARDS (not tracks), so we don't run normalizeTrack.
  */
-export function lookup({ name, type = "artist", artist, limit = 50 } = {}) {
+export function getNewReleases({ limit = 20, offset = 0 } = {}) {
+  const key = `newreleases:${limit}:${offset}`;
+  const cached = _shelfGet(key);
+  if (cached) return Promise.resolve(cached);
+
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return getJson(`/new-releases?${params.toString()}`).then((d) => {
+    const out = { count: d.count || 0, results: d.results || [] };
+    _shelfSet(key, out);
+    return out;
+  });
+}
+
+/**
+ * Resolve an artist or album page. Lyrica/JioSaavn have no id lookup for our own
+ * catalog, so we resolve by `name` (+ optional `artist`/`year` for albums). A
+ * JioSaavn album card instead resolves by `saavnId` (expanded into its tracks).
+ *
+ * @param {{ name?:string, type?:'artist'|'album', artist?:string, year?:number, saavnId?:string, limit?:number }} opts
+ */
+export function lookup({ name, type = "artist", artist, year, saavnId, limit = 50 } = {}) {
   const params = new URLSearchParams({ type, limit: String(limit) });
   if (name) params.set("name", name);
   if (artist) params.set("artist", artist);
+  if (year !== undefined && year !== null && year !== "") params.set("year", String(year));
+  if (saavnId) params.set("saavnId", String(saavnId));
   return getJson(`/lookup?${params.toString()}`).then((d) => ({
     ...d,
     results: (d.results || []).map(normalizeTrack),

@@ -1,11 +1,7 @@
 # Claude Code internals
 .claude/
 
-# Graphify tool + outputs
-graphify/
-graphify-out/
-frontend/src/graphify-out/
-analyze.py
+# Generated code-graph (static snapshot; graph tool removed)
 output.json
 
 # Python

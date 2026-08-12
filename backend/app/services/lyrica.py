@@ -634,7 +634,10 @@ async def lookup_artist(name: str, limit: Optional[int] = None) -> Dict[str, Any
 
 
 async def lookup_album(
-    name: str, artist: Optional[str] = None, limit: Optional[int] = None
+    name: str,
+    artist: Optional[str] = None,
+    year: Optional[int] = None,   # accepted for interface parity; legacy path has no year data
+    limit: Optional[int] = None,
 ) -> Dict[str, Any]:
     limit = min(max(limit or settings.DEFAULT_LIMIT, 1), settings.MAX_LIMIT)
     query = f"{name} {artist}".strip() if artist else name

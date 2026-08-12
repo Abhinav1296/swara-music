@@ -22,6 +22,11 @@ class Settings:
     PROJECT_NAME: str = "Swara Music API"
     VERSION: str = "2.0.0"
 
+    # Where songs/lyrics/audio come from:
+    #   "mongo"  -> our own precomputed catalog in MongoDB (swara.songs)   [default]
+    #   "lyrica" -> the old live-proxy path (Lyrica on Render -> JioSaavn)
+    DATA_SOURCE: str = os.getenv("SWARA_SOURCE", "mongo").strip().lower()
+
     # Lyrica base URL — a personal instance that proxies lyrics + JioSaavn audio.
     # Override with LYRICA_URL if you self-host or use a different deployment.
     LYRICA_URL: str = os.getenv("LYRICA_URL", "https://lyrica-jwtd.onrender.com").rstrip("/")

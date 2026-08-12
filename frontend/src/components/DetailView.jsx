@@ -11,7 +11,7 @@ import TrackRow from "./TrackRow";
  * `artist` hint), then renders a large frosted header (artwork + title +
  * play-all) followed by the track list. `kind` is "artist" or "album".
  */
-export default function DetailView({ name, kind, artist }) {
+export default function DetailView({ name, kind, artist, year, saavnId }) {
   const { current, isPlaying, play, shuffle, toggleShuffle } = usePlayer();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -22,27 +22,27 @@ export default function DetailView({ name, kind, artist }) {
     setLoading(true);
     setError(null);
     setData(null);
-    if (!name) {
-      // No name to resolve → render the empty state instead of a doomed fetch.
+    if (!name && !saavnId) {
+      // Nothing to resolve → render the empty state instead of a doomed fetch.
       setLoading(false);
       setData({ type: kind, title: "", results: [] });
       return undefined;
     }
-    lookup({ name, type: kind, artist, limit: 60 })
+    lookup({ name, type: kind, artist, year, saavnId, limit: 60 })
       .then((d) => active && setData(d))
       .catch((e) => active && setError(e.message || "Failed to load."))
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [name, kind, artist]);
+  }, [name, kind, artist, year, saavnId]);
 
   const tracks = data?.results || [];
   const listPlaying =
     tracks.length > 0 && current && tracks.some((t) => t.id === current.id) && isPlaying;
   const subtitle =
     kind === "album"
-      ? tracks[0]?.artistName || name
+      ? data?.subtitle || (year ? `${year} · ${tracks.length} songs` : `${tracks.length} songs`)
       : `${tracks.length} songs`;
 
   return (

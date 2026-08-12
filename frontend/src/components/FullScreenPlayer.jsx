@@ -1,9 +1,8 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { createPortal } from "react-dom";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ChevronDown,
-  ExternalLink,
   ListMusic,
   Loader2,
   Mic2,
@@ -22,8 +21,8 @@ import {
 import { usePlayer } from "../context/PlayerContext";
 import LikeButton from "./LikeButton";
 import { formatTime } from "../utils/format";
-import { buildExternalLinks, EXTERNAL_LINKS } from "../utils/externalLinks";
 import { resolveActiveLine } from "../lyrics/lyrics";
+import SyncedLyrics from "./SyncedLyrics";
 
 /**
  * Immersive full-screen "Now Playing" view. Opens from the mini bar with a
@@ -58,9 +57,7 @@ export default function FullScreenPlayer() {
     play,
   } = usePlayer();
 
-  const [rightTab, setRightTab] = useState("upnext"); // "upnext" | "lyrics"
-  const containerRef = useRef(null);
-  const lineRefs = useRef([]);
+  const [rightTab, setRightTab] = useState("lyrics"); // "upnext" | "lyrics"
 
   // Esc closes; lock body scroll while open.
   useEffect(() => {
@@ -73,22 +70,9 @@ export default function FullScreenPlayer() {
   const activeIndex =
     lyrics && lyrics.kind === "timed" ? resolveActiveLine(lyrics.lines, progress) : -1;
 
-  // Auto-scroll the active lyric line to the vertical center.
-  useEffect(() => {
-    if (activeIndex < 0 || !containerRef.current) return;
-    const el = lineRefs.current[activeIndex];
-    const c = containerRef.current;
-    if (el) {
-      c.scrollTo({
-        top: el.offsetTop - c.clientHeight / 2 + el.clientHeight / 2,
-        behavior: "smooth",
-      });
-    }
-  }, [activeIndex, lyrics]);
-
   const pct = duration ? Math.min(100, (progress / duration) * 100) : 0;
+  const volPct = Math.round((volume ?? 0) * 100);
   const art = current?.artworkUrl600 || current?.artworkUrl100;
-  const external = buildExternalLinks(current);
   const tabCls = (active) =>
     `flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition ${
       active ? "bg-white/15 text-white" : "text-white/55 hover:text-white"
@@ -111,12 +95,17 @@ export default function FullScreenPlayer() {
           role="dialog"
           aria-modal="true"
         >
-          {/* Blurred artwork backdrop */}
-          <div className="absolute inset-0 -z-10">
+          {/* Ambient color-wash backdrop — saturated bleed from the artwork,
+              darkened toward the corners (Apple's lyrics ambiance). */}
+          <div className="absolute inset-0 -z-10 bg-black">
             {art && (
-              <img src={art} alt="" className="h-full w-full scale-125 object-cover blur-3xl" />
+              <img
+                src={art}
+                alt=""
+                className="h-full w-full scale-150 object-cover opacity-70 blur-[120px] saturate-150"
+              />
             )}
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-2xl" />
+            <div className="absolute inset-0 bg-gradient-to-br from-black/30 via-black/55 to-black/80" />
           </div>
 
           {/* Top bar */}
@@ -189,9 +178,9 @@ export default function FullScreenPlayer() {
                     value={Math.min(progress, duration || 0)}
                     onChange={(e) => seek(Number(e.target.value))}
                     aria-label="Seek preview"
-                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/15 accent-accent"
+                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full"
                     style={{
-                      background: `linear-gradient(to right, #fa233b ${pct}%, rgba(255,255,255,0.15) ${pct}%)`,
+                      background: `linear-gradient(to right, #fa233b ${pct}%, rgba(255,255,255,0.2) ${pct}%)`,
                     }}
                   />
                 </div>
@@ -274,23 +263,11 @@ export default function FullScreenPlayer() {
                   value={volume}
                   onChange={(e) => setVolume(Number(e.target.value))}
                   aria-label="Volume"
-                  className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent"
+                  className="h-1 flex-1 cursor-pointer appearance-none rounded-full"
+                  style={{
+                    background: `linear-gradient(to right, #fff ${volPct}%, rgba(255,255,255,0.18) ${volPct}%)`,
+                  }}
                 />
-              </div>
-
-              {/* External "listen full song" links (legal bridge) */}
-              <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-                {EXTERNAL_LINKS.map(({ key, label }) => (
-                  <a
-                    key={key}
-                    href={external[key]}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/80 transition hover:bg-white/20 hover:text-white"
-                  >
-                    <ExternalLink size={13} /> {label}
-                  </a>
-                ))}
               </div>
 
               {/* Stream resolution status (glass error / resolving states) */}
@@ -306,7 +283,7 @@ export default function FullScreenPlayer() {
             </div>
 
             {/* Right: Up Next / Lyrics */}
-            <div className="mx-auto flex w-full max-w-md flex-col md:h-[70vh]">
+            <div className="mx-auto flex w-full max-w-md flex-col md:h-[74vh] lg:max-w-2xl">
               <div className="mb-3 flex items-center gap-1 self-start rounded-full bg-white/5 p-1">
                 <button
                   type="button"
@@ -356,13 +333,13 @@ export default function FullScreenPlayer() {
                   )}
                 </div>
               ) : (
-                <div ref={containerRef} className="no-scrollbar relative flex-1 overflow-y-auto rounded-2xl px-1">
+                <div className="relative min-h-[55vh] flex-1 md:min-h-0">
                   {lyricsStatus === "loading" && (
-                    <div className="space-y-3 py-2">
-                      {Array.from({ length: 8 }).map((_, i) => (
+                    <div className="space-y-5 py-8">
+                      {Array.from({ length: 7 }).map((_, i) => (
                         <div
                           key={i}
-                          className="h-4 animate-pulse rounded bg-white/10"
+                          className="h-8 animate-pulse rounded-lg bg-white/10"
                           style={{ width: `${55 + ((i * 7) % 40)}%` }}
                         />
                       ))}
@@ -370,29 +347,19 @@ export default function FullScreenPlayer() {
                   )}
 
                   {lyricsStatus === "available" && lyrics?.kind === "timed" && (
-                    <div className="space-y-3 py-2">
-                      {lyrics.lines.map((l, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          ref={(el) => (lineRefs.current[i] = el)}
-                          onClick={() => seek(l.time)}
-                          className={`block w-full text-left text-lg leading-relaxed transition ${
-                            i === activeIndex
-                              ? "font-semibold text-white"
-                              : "text-white/40 hover:text-white/70"
-                          }`}
-                        >
-                          {l.text || "♪"}
-                        </button>
-                      ))}
-                    </div>
+                    <SyncedLyrics
+                      lines={lyrics.lines}
+                      activeIndex={activeIndex}
+                      progress={progress}
+                      duration={duration}
+                      onSeek={seek}
+                    />
                   )}
 
                   {lyricsStatus === "available" && lyrics?.kind === "plain" && (
-                    <div className="space-y-3 py-2">
+                    <div className="no-scrollbar h-full space-y-4 overflow-y-auto py-6">
                       {lyrics.lines.map((l, i) => (
-                        <p key={i} className="text-lg leading-relaxed text-white/70">
+                        <p key={i} className="text-2xl font-semibold leading-snug text-white/80">
                           {l.text}
                         </p>
                       ))}

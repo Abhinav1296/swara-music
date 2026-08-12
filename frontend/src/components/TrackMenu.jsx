@@ -4,7 +4,6 @@ import {
   Check,
   ChevronLeft,
   Disc3,
-  ExternalLink,
   Heart,
   ListMusic,
   Mic2,
@@ -17,7 +16,6 @@ import { usePlayer } from "../context/PlayerContext";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlaylists } from "../context/PlaylistContext";
 import { useRouter } from "../context/RouterContext";
-import { buildExternalLinks, EXTERNAL_LINKS } from "../utils/externalLinks";
 import PlaylistModal from "./PlaylistModal";
 
 /**
@@ -70,12 +68,6 @@ export default function TrackMenu({ song }) {
 
   if (!song) return null;
   const liked = isLiked(song.id);
-  const external = buildExternalLinks(song);
-
-  const openExternal = (url) => {
-    window.open(url, "_blank", "noopener,noreferrer");
-    setOpen(false);
-  };
 
   const baseItems = [
     { label: "Play Next", icon: PlayCircle, onClick: () => { playNext(song); setOpen(false); } },
@@ -84,11 +76,6 @@ export default function TrackMenu({ song }) {
       label: "Add to Playlist",
       icon: Plus,
       onClick: () => { setView("playlists"); },
-    },
-    {
-      label: "Open In",
-      icon: ExternalLink,
-      onClick: () => { setView("openin"); },
     },
     {
       label: liked ? "Remove from Liked" : "Add to Liked",
@@ -101,7 +88,11 @@ export default function TrackMenu({ song }) {
             label: "Go to Album",
             icon: Disc3,
             onClick: () => {
-              navigate("album", { name: song.collectionName, artist: song.artistName });
+              navigate("album", {
+                name: song.collectionName,
+                artist: song.artistName,
+                year: song.year ?? undefined,
+              });
               setOpen(false);
             },
           },
@@ -215,30 +206,7 @@ export default function TrackMenu({ song }) {
                       )}
                     </div>
                   </div>
-                ) : (
-                  <div className="flex max-h-[58vh] flex-col">
-                    <button
-                      type="button"
-                      onClick={() => setView("main")}
-                      className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-white/40 transition hover:bg-white/10 hover:text-white"
-                    >
-                      <ChevronLeft size={14} /> Open In
-                    </button>
-                    <div className="no-scrollbar flex-1 overflow-y-auto">
-                      {EXTERNAL_LINKS.map(({ key, label }) => (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => openExternal(external[key])}
-                          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-                        >
-                          <ExternalLink size={16} className="text-white/60" />
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                ) : null}
               </motion.div>
             </>
           )}

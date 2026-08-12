@@ -25,7 +25,11 @@ export default function SongCard({ song, list }) {
   const goAlbum = (e) => {
     e.stopPropagation();
     if (song.collectionName)
-      navigate("album", { name: song.collectionName, artist: song.artistName });
+      navigate("album", {
+        name: song.collectionName,
+        artist: song.artistName,
+        year: song.year ?? undefined,
+      });
   };
 
   return (

@@ -55,6 +55,7 @@ export function normalizeTrack(t) {
     trackName: title,
     artistName: artist,
     collectionName: album,
+    year: t.year ?? null,
     artworkUrl100: art,
     artworkUrl600: art,
     previewUrl: streamUrl,

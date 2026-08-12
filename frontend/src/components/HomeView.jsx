@@ -2,13 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
 import { useRouter } from "../context/RouterContext";
-import { getTrending } from "../api/client";
+import { getTrending, getNewReleases } from "../api/client";
 import Section from "./Section";
 import ArtistCard from "./ArtistCard";
+import AlbumCard from "./AlbumCard";
 
-// Curated Telugu moods → search queries. Each becomes a horizontal shelf.
+// Curated Telugu moods → JioSaavn search queries. Each becomes a horizontal
+// shelf, fetched live from JioSaavn (daily-cached) via /api/trending?q=…
+// (New Releases is NOT here — it's a real fresh-albums row, see below.)
 const MOOD_SECTIONS = [
-  { title: "New Releases", query: "latest telugu songs" },
   { title: "Romantic Telugu", query: "telugu romantic songs" },
   { title: "Mass & Energetic", query: "telugu mass songs" },
   { title: "Melodies", query: "telugu melody songs" },
@@ -36,6 +38,7 @@ export default function HomeView() {
 
   const [trending, setTrending] = useState([]);
   const [shelfSongs, setShelfSongs] = useState([]); // accumulated tracks from mood shelves
+  const [newReleases, setNewReleases] = useState([]); // fresh Telugu album cards
 
   // Trending powers both hero and the first shelf
   useEffect(() => {
@@ -43,6 +46,15 @@ export default function HomeView() {
     getTrending(20)
       .then((d) => active && setTrending(d?.results || []))
       .catch(() => active && setTrending([]));
+    return () => { active = false; };
+  }, []);
+
+  // New Releases: real fresh Telugu albums (cards), live from JioSaavn.
+  useEffect(() => {
+    let active = true;
+    getNewReleases({ limit: 20 })
+      .then((d) => active && setNewReleases(d?.results || []))
+      .catch(() => active && setNewReleases([]));
     return () => { active = false; };
   }, []);
 
@@ -141,6 +153,22 @@ export default function HomeView() {
         onFetched={addTracks}
         fetchKey="trending-preloaded"
       />
+
+      {/* New Releases — real fresh Telugu albums (cards → album detail) */}
+      {newReleases.length > 0 && (
+        <section className="mb-8">
+          <div className="mb-3 px-1">
+            <h2 className="text-xl font-bold tracking-tight text-white">New Releases</h2>
+          </div>
+          <div className="no-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth pb-2">
+            {newReleases.map((a) => (
+              <div key={a.key || a.albumId} className="w-36 shrink-0 snap-start sm:w-40">
+                <AlbumCard album={a} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Mood / vibe shelves */}
       {MOOD_SECTIONS.map((s) => (
