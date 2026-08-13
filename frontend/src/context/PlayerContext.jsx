@@ -117,8 +117,8 @@ export function PlayerProvider({ children }) {
   // In shuffle mode, the pre-decided next track (reused on ended/next so the
   // shuffle pointer never rerolls mid-list).
   const plannedNextRef = useRef(null);
-  // When a caller asks to open the full-screen player on a specific tab (e.g.
-  // TrackMenu → "Play Video Song"), stash the requested tab here so
+  // When a caller asks to open the full-screen player on a specific tab
+  // (e.g. "lyrics" | "upnext"), stash the requested tab here so
   // FullScreenPlayer can honor it on open without forcing a re-render.
   const pendingTabRef = useRef(null);
 
@@ -735,7 +735,7 @@ export function PlayerProvider({ children }) {
     closeQueue: () => setQueueOpen(false),
     toggleQueue: () => setQueueOpen((o) => !o),
     // Open the full-screen player, optionally on a specific right-panel tab
-    // ("upnext" | "lyrics" | "video"). The tab request is read once on open.
+    // ("upnext" | "lyrics"). The tab request is read once on open.
     openFullscreen: (tab) => {
       if (tab) pendingTabRef.current = tab;
       setFullscreen(true);

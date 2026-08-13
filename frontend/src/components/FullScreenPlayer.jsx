@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { createPortal } from "react-dom";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ChevronDown,
   Layers,
@@ -16,14 +16,12 @@ import {
   Shuffle,
   SkipBack,
   SkipForward,
-  Video,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
 import LikeButton from "./LikeButton";
-import VideoPanel from "./VideoPanel";
 import { formatTime } from "../utils/format";
 import { resolveActiveLine } from "../lyrics/lyrics";
 import SyncedLyrics from "./SyncedLyrics";
@@ -33,9 +31,9 @@ import LyricVersions from "./LyricVersions";
 /**
  * Immersive full-screen "Now Playing" view. Opens from the mini bar with a
  * smooth slide-up. Large blurred-artwork backdrop, big cover, glass transport
- * controls, seek + volume, shuffle/repeat, external "listen full song" links,
- * and a tabbed right panel with "Up Next" and a "Lyrics" view. Closing slides
- * back down to the mini bar. Rendered via portal so it covers the app.
+ * controls, seek + volume, shuffle/repeat, and a tabbed right panel with
+ * "Up Next" and a "Lyrics" view. Closing slides back down to the mini bar.
+ * Rendered via portal so it covers the app.
  */
 export default function FullScreenPlayer() {
   const {
@@ -65,7 +63,7 @@ export default function FullScreenPlayer() {
     pendingTabRef,
   } = usePlayer();
 
-  const [rightPanel, setRightPanel] = useState("lyrics"); // "none" | "lyrics" | "upnext" | "video"
+  const [rightPanel, setRightPanel] = useState("lyrics"); // "none" | "lyrics" | "upnext"
   const togglePanel = (p) => setRightPanel((cur) => (cur === p ? "none" : p));
   const [lyricScript, setLyricScript] = useState("telugu"); // "telugu" | "roman"
   const [versionsOpen, setVersionsOpen] = useState(false);
@@ -73,10 +71,6 @@ export default function FullScreenPlayer() {
   // lyrics + its label). Null = show the backend's default lyrics.
   const [overrideLyrics, setOverrideLyrics] = useState(null);
   const [overrideLabel, setOverrideLabel] = useState(null);
-  // Video↔audio coordination: when the Video panel is open we pause the in-app
-  // <audio> so two sources never play at once; restore on leave/close.
-  const videoPausedAudioRef = useRef(false);
-  const prevPanelRef = useRef("lyrics");
 
   // Esc closes; lock body scroll while open.
   useEffect(() => {
@@ -86,8 +80,8 @@ export default function FullScreenPlayer() {
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen, closeFullscreen]);
 
-  // Honor a panel requested when the player opened (TrackMenu "Play Video Song"
-  // → openFullscreen("video")). Only jumps when a specific tab was requested.
+  // Honor a panel requested when the player opened via openFullscreen(tab).
+  // Only jumps when a specific tab was requested.
   useEffect(() => {
     if (!fullscreen) return undefined;
     const t = pendingTabRef?.current;
@@ -97,34 +91,6 @@ export default function FullScreenPlayer() {
     }
     return undefined;
   }, [fullscreen, pendingTabRef]);
-
-  // Pause in-app audio while the Video panel is open; restore when leaving it.
-  // Only auto-resume if *we* paused it and it's still paused (respect manual
-  // play/pause done while on the video).
-  useEffect(() => {
-    const wasVideo = prevPanelRef.current === "video";
-    const isVideo = rightPanel === "video";
-    if (isVideo && !wasVideo && fullscreen) {
-      if (isPlaying) {
-        videoPausedAudioRef.current = true;
-        toggle();
-      }
-    } else if (!isVideo && wasVideo) {
-      if (videoPausedAudioRef.current && !isPlaying) toggle();
-      videoPausedAudioRef.current = false;
-    }
-    prevPanelRef.current = rightPanel;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rightPanel, fullscreen, isPlaying, toggle]);
-
-  // If the player closes while the Video panel is open, restore audio too.
-  useEffect(() => {
-    if (!fullscreen && videoPausedAudioRef.current && !isPlaying) {
-      videoPausedAudioRef.current = false;
-      toggle();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullscreen, isPlaying, toggle]);
 
   // Reset per-track lyric UI state (script, chosen version, open picker).
   useEffect(() => {
@@ -182,11 +148,7 @@ export default function FullScreenPlayer() {
   // The Up Next / Lyrics body — written once, reused by the desktop side column
   // and the mobile full-screen sheet so the two never drift apart.
   const renderPanel = () =>
-    rightPanel === "video" ? (
-      <div className="flex min-h-[55vh] flex-1 flex-col md:min-h-0">
-        <VideoPanel current={current} />
-      </div>
-    ) : rightPanel === "upnext" ? (
+    rightPanel === "upnext" ? (
       <div className="no-scrollbar flex-1 space-y-1 overflow-y-auto rounded-2xl">
         {upcoming.length === 0 ? (
           <div className="glass flex flex-col items-center gap-2 rounded-2xl py-12 text-center">
@@ -518,7 +480,7 @@ export default function FullScreenPlayer() {
                 />
               </div>
 
-              {/* Lyrics / Up Next / Video toggles — separate buttons, mobile + desktop.
+              {/* Lyrics / Up Next toggles — separate buttons, mobile + desktop.
                   Toggling the active one off returns to the album-only view. */}
               <div className="mt-6 flex w-full items-center gap-2">
                 <button
@@ -536,14 +498,6 @@ export default function FullScreenPlayer() {
                   className={panelBtn(rightPanel === "upnext")}
                 >
                   <ListMusic size={17} /> Up Next
-                </button>
-                <button
-                  type="button"
-                  onClick={() => togglePanel("video")}
-                  aria-pressed={rightPanel === "video"}
-                  className={panelBtn(rightPanel === "video")}
-                >
-                  <Video size={17} /> Video
                 </button>
               </div>
 
@@ -620,14 +574,6 @@ export default function FullScreenPlayer() {
                       className={panelBtn(rightPanel === "upnext")}
                     >
                       <ListMusic size={17} /> Up Next
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setRightPanel("video")}
-                      aria-pressed={rightPanel === "video"}
-                      className={panelBtn(rightPanel === "video")}
-                    >
-                      <Video size={17} /> Video
                     </button>
                   </div>
                   <button
