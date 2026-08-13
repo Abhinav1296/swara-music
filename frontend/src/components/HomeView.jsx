@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Pause, Play } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
@@ -7,6 +7,7 @@ import { getTrending, getNewReleases } from "../api/client";
 import Section from "./Section";
 import ArtistCard from "./ArtistCard";
 import AlbumCard from "./AlbumCard";
+import RecommendationsShelf from "./RecommendationsShelf";
 
 // Curated Telugu moods → JioSaavn search queries. Each becomes a horizontal
 // shelf, fetched live from JioSaavn (daily-cached) via /api/trending?q=…
@@ -65,12 +66,19 @@ export default function HomeView() {
   const [trending, setTrending] = useState([]);
   const [shelfSongs, setShelfSongs] = useState([]); // accumulated tracks from mood shelves
   const [newReleases, setNewReleases] = useState([]); // fresh Telugu album cards
+  // Track ids already shown on Home so the recommendations shelf can dedupe.
+  const displayedIdsRef = useRef(new Set());
 
   // Trending powers both hero and the first shelf
   useEffect(() => {
     let active = true;
     getTrending(20)
-      .then((d) => active && setTrending(d?.results || []))
+      .then((d) => {
+        if (!active) return;
+        const results = d?.results || [];
+        setTrending(results);
+        results.forEach((t) => t?.id && displayedIdsRef.current.add(t.id));
+      })
       .catch(() => active && setTrending([]));
     return () => { active = false; };
   }, []);
@@ -87,6 +95,7 @@ export default function HomeView() {
   // Stable callback for Section to report its fetched songs (avoids refetch loops)
   const addTracks = useCallback((tracks) => {
     if (!Array.isArray(tracks) || tracks.length === 0) return;
+    for (const t of tracks) if (t?.id) displayedIdsRef.current.add(t.id);
     setShelfSongs((prev) => {
       // dedupe by id
       const seen = new Set(prev.map((t) => t?.id).filter(Boolean));
@@ -289,6 +298,9 @@ export default function HomeView() {
           onFetched={addTracks}
         />
       ))}
+
+      {/* Because You Liked — local, account-free recommendations (hidden if no likes) */}
+      <RecommendationsShelf displayedIdsRef={displayedIdsRef} />
 
       {/* Popular Artists (derived from shelves) */}
       <section className="mb-8">

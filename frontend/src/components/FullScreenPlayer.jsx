@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { createPortal } from "react-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   Layers,
@@ -16,12 +16,14 @@ import {
   Shuffle,
   SkipBack,
   SkipForward,
+  Video,
   Volume2,
   VolumeX,
   X,
 } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
 import LikeButton from "./LikeButton";
+import VideoPanel from "./VideoPanel";
 import { formatTime } from "../utils/format";
 import { resolveActiveLine } from "../lyrics/lyrics";
 import SyncedLyrics from "./SyncedLyrics";
@@ -59,9 +61,11 @@ export default function FullScreenPlayer() {
     cycleRepeat,
     closeFullscreen,
     play,
+    retry,
+    pendingTabRef,
   } = usePlayer();
 
-  const [rightPanel, setRightPanel] = useState("lyrics"); // "none" | "lyrics" | "upnext"
+  const [rightPanel, setRightPanel] = useState("lyrics"); // "none" | "lyrics" | "upnext" | "video"
   const togglePanel = (p) => setRightPanel((cur) => (cur === p ? "none" : p));
   const [lyricScript, setLyricScript] = useState("telugu"); // "telugu" | "roman"
   const [versionsOpen, setVersionsOpen] = useState(false);
@@ -69,6 +73,10 @@ export default function FullScreenPlayer() {
   // lyrics + its label). Null = show the backend's default lyrics.
   const [overrideLyrics, setOverrideLyrics] = useState(null);
   const [overrideLabel, setOverrideLabel] = useState(null);
+  // Video↔audio coordination: when the Video panel is open we pause the in-app
+  // <audio> so two sources never play at once; restore on leave/close.
+  const videoPausedAudioRef = useRef(false);
+  const prevPanelRef = useRef("lyrics");
 
   // Esc closes; lock body scroll while open.
   useEffect(() => {
@@ -77,6 +85,46 @@ export default function FullScreenPlayer() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen, closeFullscreen]);
+
+  // Honor a panel requested when the player opened (TrackMenu "Play Video Song"
+  // → openFullscreen("video")). Only jumps when a specific tab was requested.
+  useEffect(() => {
+    if (!fullscreen) return undefined;
+    const t = pendingTabRef?.current;
+    if (t) {
+      setRightPanel(t);
+      pendingTabRef.current = null;
+    }
+    return undefined;
+  }, [fullscreen, pendingTabRef]);
+
+  // Pause in-app audio while the Video panel is open; restore when leaving it.
+  // Only auto-resume if *we* paused it and it's still paused (respect manual
+  // play/pause done while on the video).
+  useEffect(() => {
+    const wasVideo = prevPanelRef.current === "video";
+    const isVideo = rightPanel === "video";
+    if (isVideo && !wasVideo && fullscreen) {
+      if (isPlaying) {
+        videoPausedAudioRef.current = true;
+        toggle();
+      }
+    } else if (!isVideo && wasVideo) {
+      if (videoPausedAudioRef.current && !isPlaying) toggle();
+      videoPausedAudioRef.current = false;
+    }
+    prevPanelRef.current = rightPanel;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rightPanel, fullscreen, isPlaying, toggle]);
+
+  // If the player closes while the Video panel is open, restore audio too.
+  useEffect(() => {
+    if (!fullscreen && videoPausedAudioRef.current && !isPlaying) {
+      videoPausedAudioRef.current = false;
+      toggle();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullscreen, isPlaying, toggle]);
 
   // Reset per-track lyric UI state (script, chosen version, open picker).
   useEffect(() => {
@@ -111,7 +159,7 @@ export default function FullScreenPlayer() {
   const volPct = Math.round((volume ?? 0) * 100);
   const art = current?.artworkUrl600 || current?.artworkUrl100;
   const panelBtn = (active) =>
-    `flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold transition ${
+    `flex flex-1 items-center justify-center gap-1.5 rounded-2xl px-3 py-2.5 text-sm font-semibold transition ${
       active
         ? "glass-glossy text-white ring-1 ring-accent/60 shadow-glow"
         : "glass-glossy text-white/60 hover:text-white"
@@ -134,7 +182,11 @@ export default function FullScreenPlayer() {
   // The Up Next / Lyrics body — written once, reused by the desktop side column
   // and the mobile full-screen sheet so the two never drift apart.
   const renderPanel = () =>
-    rightPanel === "upnext" ? (
+    rightPanel === "video" ? (
+      <div className="flex min-h-[55vh] flex-1 flex-col md:min-h-0">
+        <VideoPanel current={current} />
+      </div>
+    ) : rightPanel === "upnext" ? (
       <div className="no-scrollbar flex-1 space-y-1 overflow-y-auto rounded-2xl">
         {upcoming.length === 0 ? (
           <div className="glass flex flex-col items-center gap-2 rounded-2xl py-12 text-center">
@@ -466,16 +518,16 @@ export default function FullScreenPlayer() {
                 />
               </div>
 
-              {/* Lyrics / Up Next toggles — two separate buttons, mobile + desktop.
-                  Toggling both off returns to the album-only "now playing" view. */}
-              <div className="mt-6 flex w-full items-center gap-3">
+              {/* Lyrics / Up Next / Video toggles — separate buttons, mobile + desktop.
+                  Toggling the active one off returns to the album-only view. */}
+              <div className="mt-6 flex w-full items-center gap-2">
                 <button
                   type="button"
                   onClick={() => togglePanel("lyrics")}
                   aria-pressed={rightPanel === "lyrics"}
                   className={panelBtn(rightPanel === "lyrics")}
                 >
-                  <MessageSquareQuote size={18} /> Lyrics
+                  <MessageSquareQuote size={17} /> Lyrics
                 </button>
                 <button
                   type="button"
@@ -483,18 +535,37 @@ export default function FullScreenPlayer() {
                   aria-pressed={rightPanel === "upnext"}
                   className={panelBtn(rightPanel === "upnext")}
                 >
-                  <ListMusic size={18} /> Up Next
+                  <ListMusic size={17} /> Up Next
+                </button>
+                <button
+                  type="button"
+                  onClick={() => togglePanel("video")}
+                  aria-pressed={rightPanel === "video"}
+                  className={panelBtn(rightPanel === "video")}
+                >
+                  <Video size={17} /> Video
                 </button>
               </div>
 
               {/* Stream resolution status (glass error / resolving states) */}
               {streamError && (
-                <div className="mt-3 rounded-full bg-white/10 px-4 py-1.5 text-center text-xs text-white/70">
-                  {streamError === "no_stream"
-                    ? "Full song unavailable — try a link above"
-                    : streamError === "not_found"
-                    ? "Track not found"
-                    : "Couldn’t reach the music service"}
+                <div className="mt-3 flex items-center justify-center gap-3 rounded-full bg-white/10 px-4 py-1.5 text-xs text-white/70">
+                  <span>
+                    {streamError === "no_stream"
+                      ? "Full song unavailable"
+                      : streamError === "not_found"
+                      ? "Track not found"
+                      : "Couldn’t reach the music service"}
+                  </span>
+                  {retry && streamError !== "not_found" && (
+                    <button
+                      type="button"
+                      onClick={() => retry()}
+                      className="font-semibold text-accent transition hover:underline"
+                    >
+                      Retry
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -549,6 +620,14 @@ export default function FullScreenPlayer() {
                       className={panelBtn(rightPanel === "upnext")}
                     >
                       <ListMusic size={17} /> Up Next
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRightPanel("video")}
+                      aria-pressed={rightPanel === "video"}
+                      className={panelBtn(rightPanel === "video")}
+                    >
+                      <Video size={17} /> Video
                     </button>
                   </div>
                   <button

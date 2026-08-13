@@ -46,7 +46,7 @@ function _makeError(res, detail) {
 }
 
 async function getJson(path, { signal } = {}) {
-  const res = await fetch(`${BASE}${path}`, { signal });
+  const res = await fetch(`${BASE}${path}`, signal ? { signal } : undefined);
   if (!res.ok) {
     let detail = `Request failed (${res.status})`;
     try {
@@ -128,6 +128,9 @@ export function getAlbums({ limit = 48, offset = 0 } = {}) {
  * Returns the raw backend SongDetails (caller normalizes lyrics/artwork).
  *
  * @param {{artist:string, song:string, url?:string, signal?:AbortSignal}} opts
+ *   `signal` is forwarded to fetch so callers can abort an in-flight resolve
+ *   (e.g. when the user skips before it completes). Aborting throws an
+ *   `AbortError`, which the player treats as a benign cancel (not a failure).
  */
 export function getSongDetails({ artist, song, url, signal } = {}) {
   const params = new URLSearchParams();

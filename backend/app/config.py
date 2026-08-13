@@ -60,6 +60,22 @@ class Settings:
     # repeated (artist, song) lookups are fast and upstream-friendly.
     SONG_CACHE_TTL: int = int(os.getenv("SONG_CACHE_TTL", str(60 * 60 * 6)))
 
+    # Upstream concurrency cap. A single asyncio.Semaphore bounds how many
+    # simultaneous Lyrica/JioSaavn calls we issue, so a burst of Home requests
+    # can't overload the personal Lyrica instance.
+    MAX_CONCURRENT_UPSTREAM: int = int(os.getenv("MAX_CONCURRENT_UPSTREAM", "4"))
+
+    # TTL cache for the read-heavy list endpoints. These are safe to cache
+    # because the catalog moves slowly relative to a request burst and the
+    # values are cheap to recompute on a miss.
+    SEARCH_CACHE_TTL: int = int(os.getenv("SEARCH_CACHE_TTL", str(15 * 60)))  # 15 min
+    TRENDING_CACHE_TTL: int = int(os.getenv("TRENDING_CACHE_TTL", str(10 * 60)))  # 10 min
+    LOOKUP_CACHE_TTL: int = int(os.getenv("LOOKUP_CACHE_TTL", str(30 * 60)))  # 30 min
+
+    # Hard cap on entries per in-memory cache. When exceeded we evict expired
+    # entries first, then the oldest (LRU by insertion order), to bound memory.
+    CACHE_MAX_ENTRIES: int = int(os.getenv("CACHE_MAX_ENTRIES", "256"))
+
     # CORS — the Vite dev server origin(s). For the Capacitor APK, also allow the
     # native WebView origin, e.g. CORS_ORIGINS="http://localhost:5173,https://localhost".
     CORS_ORIGINS: list[str] = [

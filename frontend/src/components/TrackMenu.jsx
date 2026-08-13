@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   Plus,
   PlayCircle,
+  PlaySquare,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { usePlayer } from "../context/PlayerContext";
@@ -34,7 +35,7 @@ export default function TrackMenu({ song, triggerClassName, iconSize = 18, eleva
   const [modalOpen, setModalOpen] = useState(false);
   const btnRef = useRef(null);
 
-  const { playNext, addToQueue } = usePlayer();
+  const { playNext, addToQueue, play, openFullscreen } = usePlayer();
   const { isLiked, toggleLike } = useLibrary();
   const { playlists, createPlaylist, addToPlaylist, isInPlaylist } = usePlaylists();
   const { navigate } = useRouter();
@@ -72,6 +73,17 @@ export default function TrackMenu({ song, triggerClassName, iconSize = 18, eleva
   const baseItems = [
     { label: "Play Next", icon: PlayCircle, onClick: () => { playNext(song); setOpen(false); } },
     { label: "Add to Queue", icon: ListMusic, onClick: () => { addToQueue(song); setOpen(false); } },
+    {
+      label: "Play Video Song",
+      icon: PlaySquare,
+      onClick: () => {
+        // Play the track (so it becomes the current track for the Video tab)
+        // and open the full-screen player directly on the Video tab.
+        play(song, [song]);
+        openFullscreen("video");
+        setOpen(false);
+      },
+    },
     {
       label: "Add to Playlist",
       icon: Plus,

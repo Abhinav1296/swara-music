@@ -3,6 +3,8 @@
 Run with:  uvicorn app.main:app --reload --port 8000
 Docs at:   http://localhost:8000/docs
 """
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,17 +12,55 @@ import logging
 import time
 import uuid
 
+import httpx
+
 from app.config import settings
 from app.routes import auth, search
-from app.services.lyrica import _request_id_ctx
+from app.services.lyrica import (
+    _request_id_ctx,
+    clear_http_client,
+    set_http_client,
+)
 
 # Diagnostic perf logging (safe to remove). Ensures our [perf] logs are emitted.
 logging.getLogger("swara").setLevel(logging.INFO)
 logger = logging.getLogger("swara.perf")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Own a single pooled httpx.AsyncClient for the whole worker lifetime.
+
+    Reusing one client with keep-alive limits lets repeated upstream calls to
+    Lyrica/JioSaavn reuse TCP/TLS connections instead of handshaking (~0.5–1.5s)
+    on every request.
+    """
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(
+            connect=settings.LYRICA_CONNECT_TIMEOUT,
+            read=settings.LYRICA_READ_TIMEOUT,
+            write=settings.LYRICA_READ_TIMEOUT,
+            pool=settings.LYRICA_READ_TIMEOUT,
+        ),
+        headers={"Accept": "application/json", **settings.LYRICA_EXTRA_HEADERS},
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        follow_redirects=True,
+    )
+    set_http_client(client)
+    app.state.http = client
+    logger.info("[perf] httpx pooled client started (keep-alive=10)")
+    try:
+        yield
+    finally:
+        clear_http_client()
+        await client.aclose()
+        logger.info("[perf] httpx pooled client closed")
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
+    lifespan=lifespan,
     description=(
         "A thin proxy + helper API for browsing, streaming, and reading lyrics "
         "for Telugu songs. Backed by a personal Lyrica instance (LRCLib/MusicBrainz "
