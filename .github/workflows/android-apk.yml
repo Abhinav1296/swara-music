@@ -20,10 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Capacitor 8's CLI requires Node >= 22 (`npx cap sync` fails on 20).
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "22"
 
       # Capacitor 8 (AGP 8.13 / Gradle 8.14 / compileSdk 36) requires JDK 21.
       # Building with JDK 17 fails the Gradle step with exit code 1.
