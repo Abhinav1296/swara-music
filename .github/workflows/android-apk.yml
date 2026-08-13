@@ -50,6 +50,19 @@ jobs:
         working-directory: frontend
         run: npx cap sync android
 
+      # Turn a single logo (frontend/assets/icon.png, 1024x1024) into every
+      # Android launcher-icon density + adaptive icon. No-op until you add the
+      # file, so the build stays green either way.
+      - name: Apply app icon (if a logo is provided)
+        working-directory: frontend
+        run: |
+          if [ -f assets/icon.png ]; then
+            echo "Found assets/icon.png — generating Android launcher icons."
+            npx @capacitor/assets generate --android
+          else
+            echo "No assets/icon.png provided — using the default Capacitor icon."
+          fi
+
       - name: Build debug APK
         working-directory: frontend/android
         run: |
