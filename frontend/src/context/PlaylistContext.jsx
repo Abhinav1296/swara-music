@@ -3,16 +3,25 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { loadJSON, saveJSON, STORAGE_KEYS } from "../utils/storage";
+import { useAuth } from "./AuthContext";
+import { getPlaylists, savePlaylists } from "../api/client";
 
 /**
- * Local, auth-free custom playlists.
+ * Custom playlists — local-first, account-synced when signed in.
  *
  * Each playlist stores its songs as full Swara Song objects (no backend to
  * re-resolve a track id), so playback works offline and instantly. Everything
- * is persisted to localStorage so it survives reloads.
+ * is persisted to localStorage so it survives reloads and works logged-out.
+ *
+ * When a user signs in, their local playlists are union-merged with whatever is
+ * stored on their account (migrating local-only playlists up), and from then on
+ * every change is written through to the account (debounced). The account is the
+ * source of truth once signed in; localStorage keeps mirroring it so the app
+ * still works offline / after sign-out.
  *
  * Shape: [{ id, name, songs: song[], createdAt }]
  */
@@ -27,10 +36,102 @@ function uid() {
   return `pl_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
 }
 
+/**
+ * Union-merge two playlist arrays by id. For a shared id, songs are unioned
+ * (server order first, then any local songs not already present). Playlists
+ * unique to either side are kept — nothing is dropped on first sync.
+ */
+function mergePlaylists(local, server) {
+  const byId = new Map();
+  for (const p of server || []) {
+    if (p && p.id) byId.set(p.id, { ...p, songs: [...(p.songs || [])] });
+  }
+  for (const p of local || []) {
+    if (!p || !p.id) continue;
+    const existing = byId.get(p.id);
+    if (!existing) {
+      byId.set(p.id, { ...p, songs: [...(p.songs || [])] });
+      continue;
+    }
+    const seen = new Set(existing.songs.map((s) => s.id));
+    for (const s of p.songs || []) {
+      if (s && !seen.has(s.id)) {
+        existing.songs.push(s);
+        seen.add(s.id);
+      }
+    }
+  }
+  return Array.from(byId.values());
+}
+
 export function PlaylistProvider({ children }) {
+  const { token } = useAuth();
   const [playlists, setPlaylists] = useState(() => loadJSON(STORAGE_KEYS.playlists, []));
 
+  // Always mirror to localStorage (offline / logged-out store + instant boot).
   useEffect(() => saveJSON(STORAGE_KEYS.playlists, playlists), [playlists]);
+
+  // The token we've hydrated for, the last JSON we synced with the server (so
+  // write-through only fires on genuine user changes), and the debounce timer.
+  const syncedTokenRef = useRef(null);
+  const lastSyncedRef = useRef(null);
+  const saveTimerRef = useRef(null);
+
+  // On sign-in: pull the account's playlists, union-merge with whatever is local
+  // (migrating local-only playlists up), then push the merged set back so the
+  // account becomes the source of truth. A network/auth hiccup leaves the local
+  // playlists untouched and retries on the next mount.
+  useEffect(() => {
+    if (!token) {
+      syncedTokenRef.current = null;
+      lastSyncedRef.current = null;
+      return undefined;
+    }
+    if (syncedTokenRef.current === token) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { playlists: server } = await getPlaylists(token);
+        if (cancelled) return;
+        const merged = mergePlaylists(playlists, server || []);
+        lastSyncedRef.current = JSON.stringify(merged);
+        setPlaylists(merged);
+        syncedTokenRef.current = token;
+        try {
+          const { playlists: saved } = await savePlaylists(token, merged);
+          if (!cancelled && saved) lastSyncedRef.current = JSON.stringify(saved);
+        } catch {
+          /* keep local; the write-through effect will retry on next change */
+        }
+      } catch {
+        /* stay on local playlists; retry on next mount */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // Write-through: when signed in and the set actually changed vs the server,
+  // debounce-save the whole array up.
+  useEffect(() => {
+    if (!token || syncedTokenRef.current !== token) return undefined;
+    const cur = JSON.stringify(playlists);
+    if (cur === lastSyncedRef.current) return undefined;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        const { playlists: saved } = await savePlaylists(token, playlists);
+        lastSyncedRef.current = JSON.stringify(saved ?? playlists);
+      } catch {
+        /* leave lastSynced as-is so the next change retries */
+      }
+    }, 800);
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, [playlists, token]);
 
   const createPlaylist = useCallback((name) => {
     const id = uid();

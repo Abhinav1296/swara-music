@@ -286,6 +286,24 @@ export async function updateProfile(token, patch) {
   return res.json();
 }
 
+/** Fetch the account's synced playlists. Returns { playlists }. */
+export async function getPlaylists(token) {
+  const res = await fetch(`${BASE}/playlists`, { headers: _authHeader(token) });
+  if (!res.ok) throw await _readErr(res);
+  return res.json();
+}
+
+/** Replace the account's playlists with `playlists` (whole array). Returns { playlists }. */
+export async function savePlaylists(token, playlists) {
+  const res = await fetch(`${BASE}/playlists`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ..._authHeader(token) },
+    body: JSON.stringify({ playlists }),
+  });
+  if (!res.ok) throw await _readErr(res);
+  return res.json();
+}
+
 export async function sendLyricFeedback({ songId, source }) {
   const res = await fetch(`${BASE}/lyrics/feedback`, {
     method: "POST",

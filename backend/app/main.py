@@ -15,7 +15,7 @@ import uuid
 import httpx
 
 from app.config import settings
-from app.routes import auth, search
+from app.routes import auth, playlists, search
 from app.services.lyrica import (
     _request_id_ctx,
     clear_http_client,
@@ -79,6 +79,7 @@ app.add_middleware(
 
 app.include_router(search.router)
 app.include_router(auth.router)
+app.include_router(playlists.router)
 
 
 @app.middleware("http")

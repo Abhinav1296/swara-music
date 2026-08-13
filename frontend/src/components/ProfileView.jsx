@@ -2,6 +2,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Check, Loader2, LogOut, Pencil, RefreshCw, UserRound, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { usePlaylists } from "../context/PlaylistContext";
 import GoogleSignInButton from "./GoogleSignInButton";
 
 // Suggested singers to seed the "favorites" picker (users can add any others).
@@ -72,6 +73,7 @@ export default function ProfileView() {
 /** The signed-in editor: header, name edit, favorite singers, account actions. */
 function ProfileEditor({ logout }) {
   const { user, updateProfile } = useAuth();
+  const { playlists } = usePlaylists();
   const [name, setName] = useState(user.name || "");
   const [editingName, setEditingName] = useState(false);
   const [fav, setFav] = useState(() => user.favoriteSingers || []);
@@ -244,7 +246,8 @@ function ProfileEditor({ logout }) {
         animate={{ opacity: 1 }}
         className="px-1 text-[11px] text-white/30"
       >
-        Signed in with Google. Your playlists will sync to this account.
+        Signed in with Google · {playlists.length} playlist{playlists.length === 1 ? "" : "s"}{" "}
+        synced to this account.
       </motion.p>
     </div>
   );
