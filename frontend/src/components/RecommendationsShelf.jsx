@@ -33,7 +33,7 @@ const RECENT_WEIGHT = 2; // a recently played track is a weaker signal
  * Score each artist by how much the user likes/recently played them, then
  * return the top `maxSeeds` artist display names (most-liked/recent first).
  */
-function deriveSeeds(likedMap, recentlyPlayed, maxSeeds = MAX_SEEDS) {
+function deriveSeeds(likedSongs, recentlyPlayed, maxSeeds = MAX_SEEDS) {
   const scores = new Map(); // lowerName -> { score, display }
   const bump = (name, delta) => {
     if (!name) return;
@@ -42,7 +42,7 @@ function deriveSeeds(likedMap, recentlyPlayed, maxSeeds = MAX_SEEDS) {
     cur.score += delta;
     scores.set(key, cur);
   };
-  for (const song of Object.values(likedMap || {})) bump(song?.artistName, LIKE_WEIGHT);
+  for (const song of likedSongs || []) bump(song?.artistName, LIKE_WEIGHT);
   (recentlyPlayed || []).forEach((song, i) => bump(song?.artistName, RECENT_WEIGHT / (1 + i)));
 
   return Array.from(scores.values())
@@ -57,17 +57,17 @@ function deriveSeeds(likedMap, recentlyPlayed, maxSeeds = MAX_SEEDS) {
  *   tracks the user is already looking at. Read at fetch time (after Home loads).
  */
 export default function RecommendationsShelf({ displayedIdsRef }) {
-  const { likedMap, recentlyPlayed } = useLibrary();
+  const { likedSongs, recentlyPlayed } = useLibrary();
   const [shelves, setShelves] = useState([]); // [{ artist, songs }]
 
   useEffect(() => {
-    const seeds = deriveSeeds(likedMap, recentlyPlayed, MAX_SEEDS);
+    const seeds = deriveSeeds(likedSongs, recentlyPlayed, MAX_SEEDS);
     if (seeds.length === 0) return undefined; // no likes/recents → hide silently
 
     let cancelled = false;
     const run = () => {
       if (cancelled) return;
-      const likedIds = new Set(Object.keys(likedMap || {}));
+      const likedIds = new Set((likedSongs || []).map((s) => s.id));
       const displayed = displayedIdsRef?.current;
       const seen = new Set();
       const collected = [];
