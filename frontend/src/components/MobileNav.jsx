@@ -17,7 +17,7 @@ export default function MobileNav() {
   const active = route.name;
 
   return (
-    <nav className="glass fixed bottom-0 left-0 right-0 z-40 flex border-t md:hidden">
+    <nav className="glass fixed bottom-0 left-0 right-0 z-40 flex border-t pb-[env(safe-area-inset-bottom)] md:hidden">
       {ITEMS.map(({ id, label, icon: Icon }) => {
         const isActive = active === id;
         const showAvatar = id === "profile" && isAuthed && user?.picture;

@@ -63,7 +63,7 @@ export default function NowPlayingBar() {
     isResolvingStream && !isPlaying && !(current?.streamUrl && progress > 0);
 
   return (
-    <div className="glass fixed bottom-16 left-0 right-0 z-30 flex items-center gap-3 border-t px-3 py-2 md:bottom-0 md:gap-4 md:px-6 md:py-3">
+    <div className="glass fixed bottom-[calc(4rem_+_env(safe-area-inset-bottom))] left-0 right-0 z-30 flex items-center gap-3 border-t px-3 py-2 md:bottom-0 md:gap-4 md:px-6 md:py-3">
       {/* Mobile thin progress line */}
       <div className="absolute left-0 right-0 top-0 h-0.5 bg-white/10 md:hidden">
         <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
