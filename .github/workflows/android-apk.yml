@@ -1,8 +1,8 @@
 # Build the Swara Android APK in the cloud — NO local Android Studio / SDK needed.
 #
 # Run it:  GitHub repo → Actions tab → "Build Android APK" → Run workflow.
-# Optionally paste your Render backend URL so the app has data:
-#   api_base = https://<your-service>.onrender.com/api
+# The api_base field already defaults to the live backend
+# (https://swara-backend-9kra.onrender.com/api) — just leave it and click Run.
 # When it finishes, download the "swara-debug-apk" artifact and send it to phones.
 name: Build Android APK
 
@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       api_base:
-        description: "Backend API base URL (e.g. https://swara-backend.onrender.com/api). Leave blank for a UI-only build."
+        description: "Backend API base URL. Defaults to the live Swara backend; leave as-is for a normal build."
         required: false
-        default: ""
+        default: "https://swara-backend-9kra.onrender.com/api"
 
 jobs:
   build:
