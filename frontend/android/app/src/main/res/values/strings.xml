@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Swara</string>
+    <string name="title_activity_main">Swara</string>
+    <string name="package_name">app.swara.telugu</string>
+    <string name="custom_url_scheme">app.swara.telugu</string>
+</resources>

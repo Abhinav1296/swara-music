@@ -159,6 +159,19 @@ class LyricaTimeout(LyricaError):
     """Upstream timed out — route maps this to 504."""
 
 
+class LyricaRateLimited(LyricaError):
+    """Upstream returned HTTP 429 — route maps this to 429 with Retry-After.
+
+    Retained for the route layer's error mapping; the pooled-client path handles
+    429s internally, so this may not be raised, but keeping it defined lets
+    ``app.routes.search`` import and map it uniformly.
+    """
+
+    def __init__(self, message: str, retry_after_seconds=None):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 class SongNotFound(LyricaError):
     """Both lyrics and stream are unresolvable for the given (artist, song)."""
 

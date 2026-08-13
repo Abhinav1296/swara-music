@@ -1,12 +1,50 @@
 """HTTP route definitions for the Swara (Telugu) music API."""
 import httpx
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse
 
-from app.schemas import LookupResponse, SearchResponse, SongDetails
-from app.services import lyrica
-from app.services.lyrica import LyricaError, LyricaTimeout, SongNotFound
+from app.config import settings
+from app.schemas import (
+    AlbumsResponse,
+    LookupResponse,
+    LyricsFeedbackRequest,
+    LyricsFeedbackResponse,
+    LyricsVersionsResponse,
+    SearchResponse,
+    SongDetails,
+    StreamResponse,
+)
+from app.services.lyrica import (
+    LyricaError,
+    LyricaRateLimited,
+    LyricaTimeout,
+    SongNotFound,
+)
+
+# Pick the data source. Default is our own MongoDB catalog; "lyrica" restores
+# the old live-proxy path. Both modules expose the same async interface.
+if settings.DATA_SOURCE == "lyrica":
+    from app.services import lyrica as source
+else:
+    from app.services import catalog as source
 
 router = APIRouter(prefix="/api", tags=["music"])
+
+
+def _handle_upstream_exception(exc: Exception) -> HTTPException:
+    """Map service-layer exceptions to appropriate HTTPExceptions."""
+    if isinstance(exc, LyricaRateLimited):
+        headers = {}
+        if exc.retry_after_seconds is not None:
+            headers["Retry-After"] = str(int(exc.retry_after_seconds))
+        return HTTPException(status_code=429, detail=str(exc), headers=headers)
+    if isinstance(exc, LyricaTimeout):
+        return HTTPException(status_code=504, detail=str(exc))
+    if isinstance(exc, LyricaError):
+        return HTTPException(status_code=502, detail=str(exc))
+    if isinstance(exc, httpx.HTTPError):
+        return HTTPException(status_code=502, detail=f"Lyrica upstream error: {exc}")
+    return HTTPException(status_code=500, detail="Unexpected error")
 
 
 @router.get("/health")
@@ -20,22 +58,12 @@ async def search(
     q: str = Query(..., min_length=1, description="Free-text search term"),
     limit: int = Query(25, ge=1, le=50, description="Number of results (1–50)"),
 ) -> SearchResponse:
-    """Telugu-biased search via Lyrica.
-
-    The raw query is normalized server-side (see ``lyrica.normalize_query``) so
-    the returned catalog stays Telugu-focused, then enriched with JioSaavn
-    artwork + stream handles for instant, full-length playback.
-    """
     try:
-        return await lyrica.search_songs(q, limit)
-    except LyricaTimeout as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
-    except LyricaError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Lyrica upstream error: {exc}") from exc
-    except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=500, detail="Unexpected error") from exc
+        return await source.search_songs(q, limit)
+    except SongNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc
 
 
 @router.get("/trending", response_model=SearchResponse)
@@ -43,25 +71,12 @@ async def trending(
     q: str | None = Query(None, description="Optional shelf query (JioSaavn-backed)"),
     limit: int = Query(25, ge=1, le=50, description="Number of results (1–50)"),
 ) -> SearchResponse:
-    """Curated default list of popular Telugu tracks for the home page.
-
-    With no ``q``, returns a Telugu-biased JioSaavn search ("latest telugu
-    songs") — real, artwork-rich tracks for the hero. With ``q`` (used by the
-    Home mood shelves), searches JioSaavn for that vibe. Always reflects the
-    live catalog rather than a hard-coded list.
-    """
     try:
         if q:
-            return await lyrica.search_jiosaavn_tracks(q, limit)
-        return await lyrica.get_trending(limit)
-    except LyricaTimeout as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
-    except LyricaError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Lyrica upstream error: {exc}") from exc
-    except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=500, detail="Unexpected error") from exc
+            return await source.search_jiosaavn_tracks(q, limit)
+        return await source.get_trending(limit)
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc
 
 
 @router.get("/song-details", response_model=SongDetails)
@@ -75,13 +90,35 @@ async def song_details(
         description="Optional JioSaavn perma_url for fast stream resolution",
     ),
 ) -> SongDetails:
-    """Resolve a track into a full-length stream + synced/plain lyrics + metadata.
+    effective_song = song or title or track
+    if not effective_song:
+        raise HTTPException(
+            status_code=422,
+            detail="`song` (or `title`/`track`) is required",
+        )
+    try:
+        return await source.get_song_details(artist, effective_song, url)
+    except SongNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc
 
-    Required: ``artist`` and one of ``song`` / ``title`` / ``track``.
-    Successes are cached in-memory (keyed by normalized artist+song) so repeats
-    are fast and upstream-friendly. A successful resolution with no stream URL
-    still returns ``200`` with ``hasFullStream=false``; only when *both* lyrics
-    and stream are unresolvable do we return ``404``.
+
+@router.get("/stream", response_model=StreamResponse)
+async def stream(
+    artist: str = Query(..., min_length=1, description="Track artist"),
+    song: str | None = Query(None, description="Track title (aliased by `title`/`track`)"),
+    title: str | None = Query(None, alias="title", description="Alias of `song`"),
+    track: str | None = Query(None, alias="track", description="Alias of `song`"),
+    url: str | None = Query(
+        None,
+        description="Optional JioSaavn perma_url for fast stream resolution",
+    ),
+):
+    """
+    Resolve ONLY the stream URL + minimal metadata for fast playback start.
+    Returns 404 with a proper JSON body `{status: "not_found", ...}` when no
+    stream can be resolved. Never returns 500 for "not found" cases.
     """
     effective_song = song or title or track
     if not effective_song:
@@ -90,17 +127,56 @@ async def song_details(
             detail="`song` (or `title`/`track`) is required",
         )
     try:
-        return await lyrica.get_song_details(artist, effective_song, url)
-    except SongNotFound as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except LyricaTimeout as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
-    except LyricaError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Lyrica upstream error: {exc}") from exc
-    except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=500, detail="Unexpected error") from exc
+        details = await source.get_stream_details(artist, effective_song, url)
+        return details
+    except SongNotFound:
+        # Return a proper JSON body (not stuffed into "detail") so the frontend
+        # can read {status: "not_found", ...} directly from the response.
+        return JSONResponse(
+            status_code=404,
+            content={
+                "status": "not_found",
+                "stream_url": None,
+                "artist": artist,
+                "title": effective_song,
+                "album": None,
+                "artwork": None,
+                "durationMs": None,
+                "source": "lyrica",
+            },
+        )
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc
+
+
+@router.get("/albums", response_model=AlbumsResponse)
+async def albums(
+    limit: int = Query(40, ge=1, le=100, description="Albums per page (1–100)"),
+    offset: int = Query(0, ge=0, description="How many albums to skip (paging)"),
+) -> AlbumsResponse:
+    """Browse real movie-albums (deduped by canonical name+year, junk filtered)."""
+    get_albums = getattr(source, "get_albums", None)
+    if get_albums is None:  # legacy lyrica source has no album browse
+        return AlbumsResponse(count=0, results=[])
+    try:
+        return await get_albums(limit=limit, offset=offset)
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc
+
+
+@router.get("/new-releases", response_model=AlbumsResponse)
+async def new_releases(
+    limit: int = Query(20, ge=1, le=40, description="Albums to return (1–40)"),
+    offset: int = Query(0, ge=0, description="How many to skip (paging)"),
+) -> AlbumsResponse:
+    """Fresh Telugu album cards, live from JioSaavn (daily-cached)."""
+    get_new = getattr(source, "get_new_releases", None)
+    if get_new is None:  # legacy lyrica source has no JioSaavn album feed
+        return AlbumsResponse(count=0, results=[])
+    try:
+        return await get_new(limit=limit, offset=offset)
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc
 
 
 @router.get("/lookup", response_model=LookupResponse)
@@ -111,31 +187,62 @@ async def lookup(
     name: str | None = Query(None, description="Artist or album name to resolve"),
     q: str | None = Query(None, description="Free-text alias of `name`"),
     album: str | None = Query(None, description="Album name alias of `name`"),
+    year: int | None = Query(None, description="Album year — disambiguates same-named films"),
+    saavnId: str | None = Query(None, description="JioSaavn album id — expands a live album into tracks"),
     entity: str = Query("song", description="Unused legacy entity param"),
-    limit: int = Query(25, ge=1, le=50, description="Number of results (1–50)"),
+    # Album/artist pages request more than a search page (a soundtrack can run
+    # 20-40+ tracks). The detail view asks for 60, so the ceiling must clear it.
+    limit: int = Query(60, ge=1, le=100, description="Number of results (1–100)"),
 ) -> LookupResponse:
-    """Best-effort artist/album lookup resolved by name against Lyrica/JioSaavn.
-
-    The Lyrica/JioSaavn catalog has no artist/album ids, so browsing is done by
-    name: ``type=artist`` resolves an artist page (JioSaavn search filtered to
-    that artist); ``type=album`` resolves an album page (JioSaavn search filtered
-    to that album, optionally disambiguated by ``artist``). A legacy numeric
-    ``id`` with no name returns a safe empty envelope so old deep links never
-    hard-crash.
-    """
-    target = name or album or artist or q
-    if not target:
-        # No resolvable target (legacy id only) → safe empty shell.
-        return LookupResponse(type=type, title="", results=[])
+    """Best-effort artist/album lookup resolved by name against Lyrica/JioSaavn."""
     try:
+        # A JioSaavn album card (new releases) resolves by its album id, not name.
+        if type == "album" and saavnId:
+            expand = getattr(source, "lookup_saavn_album", None)
+            if expand is not None:
+                return await expand(saavnId, limit=limit)
+        target = name or album or artist or q
+        if not target:
+            return LookupResponse(type=type, title="", results=[])
         if type == "album":
-            return await lyrica.lookup_album(target, artist=artist, limit=limit)
-        return await lyrica.lookup_artist(target, limit=limit)
-    except LyricaTimeout as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
-    except LyricaError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Lyrica upstream error: {exc}") from exc
-    except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=500, detail="Unexpected error") from exc
+            return await source.lookup_album(target, artist=artist, year=year, limit=limit)
+        return await source.lookup_artist(target, limit=limit)
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc
+
+
+@router.get("/lyrics/versions", response_model=LyricsVersionsResponse)
+async def lyrics_versions(
+    id: str | None = Query(None, description="Song _id (preferred, exact)"),
+    artist: str | None = Query(None, description="Track artist (fallback lookup)"),
+    song: str | None = Query(None, description="Track title (aliased by title/track)"),
+    title: str | None = Query(None, alias="title", description="Alias of `song`"),
+    track: str | None = Query(None, alias="track", description="Alias of `song`"),
+    url: str | None = Query(None, description="JioSaavn perma_url (fallback lookup)"),
+) -> LyricsVersionsResponse:
+    """Every stored lyric version for one song, with running vote tallies."""
+    fn = getattr(source, "get_lyrics_versions", None)
+    if fn is None:  # legacy lyrica source has no multi-version store
+        return LyricsVersionsResponse(songId=None, chosen=None, versions=[])
+    effective_song = song or title or track
+    try:
+        res = await fn(song_id=id, artist=artist, song=effective_song, url=url)
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc
+    if res is None:
+        raise HTTPException(status_code=404, detail="No lyric versions for this track")
+    return res
+
+
+@router.post("/lyrics/feedback", response_model=LyricsFeedbackResponse)
+async def lyrics_feedback(body: LyricsFeedbackRequest) -> LyricsFeedbackResponse:
+    """Record a listener's vote for the lyric version that matches best."""
+    fn = getattr(source, "record_lyrics_feedback", None)
+    if fn is None:
+        raise HTTPException(status_code=503, detail="Feedback not supported by this source")
+    if not body.songId or not body.source:
+        raise HTTPException(status_code=422, detail="songId and source are required")
+    try:
+        return await fn(body.songId, body.source)
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc

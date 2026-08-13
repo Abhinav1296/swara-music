@@ -4,7 +4,6 @@ import {
   Check,
   ChevronLeft,
   Disc3,
-  ExternalLink,
   Heart,
   ListMusic,
   Mic2,
@@ -18,7 +17,6 @@ import { usePlayer } from "../context/PlayerContext";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlaylists } from "../context/PlaylistContext";
 import { useRouter } from "../context/RouterContext";
-import { buildExternalLinks, EXTERNAL_LINKS } from "../utils/externalLinks";
 import PlaylistModal from "./PlaylistModal";
 
 /**
@@ -30,10 +28,10 @@ import PlaylistModal from "./PlaylistModal";
  * for cards living inside horizontal scrollers). "Add to Playlist" and
  * "Open In" open second panes (submenus) within the same popover.
  */
-export default function TrackMenu({ song }) {
+export default function TrackMenu({ song, triggerClassName, iconSize = 18, elevated = false }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState("main"); // "main" | "playlists" | "openin"
-  const [coords, setCoords] = useState({ top: 0, left: 0, above: false });
+  const [coords, setCoords] = useState({ top: 0, right: 0, above: false });
   const [modalOpen, setModalOpen] = useState(false);
   const btnRef = useRef(null);
 
@@ -47,7 +45,7 @@ export default function TrackMenu({ song }) {
     if (!open && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect();
       const placeAbove = r.bottom + 260 > window.innerHeight;
-      setCoords({ top: r.bottom, left: r.right, above: placeAbove });
+      setCoords({ top: r.bottom, right: window.innerWidth - r.right, above: placeAbove });
       setView("main");
       setOpen(true);
     } else {
@@ -71,12 +69,6 @@ export default function TrackMenu({ song }) {
 
   if (!song) return null;
   const liked = isLiked(song.id);
-  const external = buildExternalLinks(song);
-
-  const openExternal = (url) => {
-    window.open(url, "_blank", "noopener,noreferrer");
-    setOpen(false);
-  };
 
   const baseItems = [
     { label: "Play Next", icon: PlayCircle, onClick: () => { playNext(song); setOpen(false); } },
@@ -98,11 +90,6 @@ export default function TrackMenu({ song }) {
       onClick: () => { setView("playlists"); },
     },
     {
-      label: "Open In",
-      icon: ExternalLink,
-      onClick: () => { setView("openin"); },
-    },
-    {
       label: liked ? "Remove from Liked" : "Add to Liked",
       icon: Heart,
       onClick: () => { toggleLike(song); setOpen(false); },
@@ -113,7 +100,11 @@ export default function TrackMenu({ song }) {
             label: "Go to Album",
             icon: Disc3,
             onClick: () => {
-              navigate("album", { name: song.collectionName, artist: song.artistName });
+              navigate("album", {
+                name: song.collectionName,
+                artist: song.artistName,
+                year: song.year ?? undefined,
+              });
               setOpen(false);
             },
           },
@@ -147,16 +138,22 @@ export default function TrackMenu({ song }) {
         type="button"
         onClick={toggle}
         aria-label="More options"
-        className="flex h-8 w-8 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white"
+        className={
+          triggerClassName ||
+          "flex h-8 w-8 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white"
+        }
       >
-        <MoreHorizontal size={18} />
+        <MoreHorizontal size={iconSize} />
       </button>
 
       {createPortal(
         <AnimatePresence>
           {open && (
             <>
-              <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+              <div
+                className={`fixed inset-0 ${elevated ? "z-[99]" : "z-[60]"}`}
+                onClick={() => setOpen(false)}
+              />
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
@@ -165,12 +162,13 @@ export default function TrackMenu({ song }) {
                 onClick={(e) => e.stopPropagation()}
                 style={{
                   position: "fixed",
-                  left: coords.left,
-                  transform: "translateX(-100%)",
+                  right: coords.right,
                   top: coords.above ? undefined : coords.top,
                   bottom: coords.above ? window.innerHeight - coords.top : undefined,
                 }}
-                className="glass-strong z-[61] max-h-[60vh] w-52 overflow-hidden rounded-xl p-1 shadow-glass"
+                className={`glass-strong ${
+                  elevated ? "z-[100]" : "z-[61]"
+                } max-h-[60vh] w-52 overflow-hidden rounded-xl p-1 shadow-glass`}
               >
                 {view === "main" ? (
                   <div className="max-h-[58vh] overflow-y-auto no-scrollbar">
@@ -198,7 +196,10 @@ export default function TrackMenu({ song }) {
                     <div className="no-scrollbar flex-1 overflow-y-auto">
                       <button
                         type="button"
-                        onClick={() => setModalOpen(true)}
+                        onClick={() => {
+                          setOpen(false);
+                          setModalOpen(true);
+                        }}
                         className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
                       >
                         <Plus size={16} className="text-accent" />
@@ -227,30 +228,7 @@ export default function TrackMenu({ song }) {
                       )}
                     </div>
                   </div>
-                ) : (
-                  <div className="flex max-h-[58vh] flex-col">
-                    <button
-                      type="button"
-                      onClick={() => setView("main")}
-                      className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-white/40 transition hover:bg-white/10 hover:text-white"
-                    >
-                      <ChevronLeft size={14} /> Open In
-                    </button>
-                    <div className="no-scrollbar flex-1 overflow-y-auto">
-                      {EXTERNAL_LINKS.map(({ key, label }) => (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => openExternal(external[key])}
-                          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
-                        >
-                          <ExternalLink size={16} className="text-white/60" />
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                ) : null}
               </motion.div>
             </>
           )}

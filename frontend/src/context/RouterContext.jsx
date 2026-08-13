@@ -13,7 +13,16 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
  */
 const RouterContext = createContext(null);
 
-const KNOWN = new Set(["home", "search", "library", "artist", "album", "playlist"]);
+const KNOWN = new Set([
+  "home",
+  "search",
+  "library",
+  "artist",
+  "album",
+  "albums",
+  "playlist",
+  "profile",
+]);
 
 function urlFor(name, params) {
   if (name === "home") return "/";
@@ -23,12 +32,22 @@ function urlFor(name, params) {
     if (params.name) u += `&name=${encodeURIComponent(params.name)}`;
     return u;
   }
-  // Artist / album pages are addressed by name (Lyrica/JioSaavn have no ids).
-  if ((name === "artist" || name === "album") && params?.name) {
-    let u = `/${name}?name=${encodeURIComponent(params.name)}`;
-    if (name === "album" && params.artist)
-      u += `&artist=${encodeURIComponent(params.artist)}`;
-    return u;
+  // Artist / album pages are addressed by name (Lyrica/JioSaavn have no ids for
+  // our own catalog). A JioSaavn album card additionally carries a saavnId.
+  if ((name === "artist" || name === "album") && (params?.name || params?.saavnId)) {
+    let u = `/${name}?`;
+    const parts = [];
+    if (params.name) parts.push(`name=${encodeURIComponent(params.name)}`);
+    if (name === "album") {
+      if (params.artist) parts.push(`artist=${encodeURIComponent(params.artist)}`);
+      // year disambiguates same-named films (Maharshi 2000 vs 2019); keep it in
+      // the URL so a refresh / deep link lands on the exact album.
+      if (params.year != null && params.year !== "" && Number.isFinite(Number(params.year)))
+        parts.push(`year=${encodeURIComponent(params.year)}`);
+      // saavnId resolves a live JioSaavn album (new releases) into its tracks.
+      if (params.saavnId) parts.push(`saavnId=${encodeURIComponent(params.saavnId)}`);
+    }
+    return u + parts.join("&");
   }
   return `/${name}`;
 }
@@ -45,13 +64,20 @@ function routeFromLocation() {
       params.id = qs.get("id");
       if (qs.get("name")) params.name = qs.get("name");
     }
-    if ((name === "artist" || name === "album") && qs.get("name")) {
-      params.name = qs.get("name");
-      if (name === "album" && qs.get("artist")) params.artist = qs.get("artist");
+    if (name === "artist" || name === "album") {
+      if (qs.get("name")) params.name = qs.get("name");
+      if (name === "album") {
+        if (qs.get("artist")) params.artist = qs.get("artist");
+        if (qs.get("year") && Number.isFinite(Number(qs.get("year"))))
+          params.year = qs.get("year");
+        if (qs.get("saavnId")) params.saavnId = qs.get("saavnId");
+      }
     }
     // A detail route without its required param is meaningless on cold boot.
     if (name === "playlist" && !params.id) return { name: "home", params: {} };
-    if ((name === "artist" || name === "album") && !params.name)
+    if (name === "artist" && !params.name) return { name: "home", params: {} };
+    // An album needs either a name (our catalog) or a saavnId (JioSaavn album).
+    if (name === "album" && !params.name && !params.saavnId)
       return { name: "home", params: {} };
     return { name, params };
   } catch {

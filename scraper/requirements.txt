@@ -1,0 +1,10 @@
+# Swara data pipeline (standalone scraper)
+httpx>=0.27
+pycryptodome>=3.20      # local DES decryption of JioSaavn's encrypted_media_url
+curl_cffi>=0.7          # scraper fetch w/ browser TLS impersonation (beats most Cloudflare)
+beautifulsoup4>=4.12    # HTML lyrics extraction (per-source adapters)
+pymongo[srv]>=4.6       # MongoDB driver ([srv] extra = Atlas mongodb+srv:// URIs)
+python-dotenv>=1.0      # loads scraper/.env (your MongoDB connection string)
+
+# dev / test only (not needed in production):
+# mongomock>=4.1         # in-memory fake MongoDB, to test without a real cluster

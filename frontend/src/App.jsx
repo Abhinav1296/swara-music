@@ -1,4 +1,6 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { AnimatePresence } from "framer-motion";
+import { AuthProvider } from "./context/AuthContext";
 import { LibraryProvider } from "./context/LibraryContext";
 import { PlaylistProvider } from "./context/PlaylistContext";
 import { RouterProvider, useRouter } from "./context/RouterContext";
@@ -15,12 +17,15 @@ import LibraryView from "./components/LibraryView";
 import PlaylistView from "./components/PlaylistView";
 import ArtistView from "./components/ArtistView";
 import AlbumView from "./components/AlbumView";
+import AlbumsView from "./components/AlbumsView";
+import ProfileView from "./components/ProfileView";
+import SplashScreen from "./components/SplashScreen";
+
+const SPLASH_KEY = "swara:splash_shown";
 
 function Shell() {
   const { route, navigate } = useRouter();
 
-  // Live + submit search. Replace history while already on the search route
-  // so typing doesn't spam the back button.
   const handleSearch = useCallback(
     (q) => {
       const term = (q || "").trim();
@@ -47,6 +52,12 @@ function Shell() {
     case "album":
       content = <AlbumView />;
       break;
+    case "albums":
+      content = <AlbumsView />;
+      break;
+    case "profile":
+      content = <ProfileView />;
+      break;
     default:
       content = <HomeView />;
   }
@@ -67,15 +78,46 @@ function Shell() {
 }
 
 export default function App() {
+  // Splash: shown once per browser session (sessionStorage, not localStorage —
+  // so it plays on cold open but not on route nav or in-tab reload).
+  const [showSplash, setShowSplash] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return sessionStorage.getItem(SPLASH_KEY) !== "true";
+    } catch {
+      return false;
+    }
+  });
+
+  // Safety net: if splash logic ever hangs, auto-hide after 4s so app is never blocked.
+  useEffect(() => {
+    if (!showSplash) return undefined;
+    const kill = setTimeout(() => {
+      try { sessionStorage.setItem(SPLASH_KEY, "true"); } catch {}
+      setShowSplash(false);
+    }, 4000);
+    return () => clearTimeout(kill);
+  }, [showSplash]);
+
+  const handleSplashDone = useCallback(() => {
+    try { sessionStorage.setItem(SPLASH_KEY, "true"); } catch {}
+    setShowSplash(false);
+  }, []);
+
   return (
-    <LibraryProvider>
-      <PlaylistProvider>
-        <RouterProvider>
-          <PlayerProvider>
-            <Shell />
-          </PlayerProvider>
-        </RouterProvider>
-      </PlaylistProvider>
-    </LibraryProvider>
+    <AuthProvider>
+      <LibraryProvider>
+        <PlaylistProvider>
+          <RouterProvider>
+            <PlayerProvider>
+              <Shell />
+              <AnimatePresence>
+                {showSplash && <SplashScreen key="splash" onComplete={handleSplashDone} />}
+              </AnimatePresence>
+            </PlayerProvider>
+          </RouterProvider>
+        </PlaylistProvider>
+      </LibraryProvider>
+    </AuthProvider>
   );
 }

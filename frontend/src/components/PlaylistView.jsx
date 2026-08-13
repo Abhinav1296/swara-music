@@ -32,7 +32,7 @@ export default function PlaylistView() {
   const playlist = getPlaylist(id);
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [coords, setCoords] = useState({ top: 0, left: 0, above: false });
+  const [coords, setCoords] = useState({ top: 0, right: 0, above: false });
   const [renameOpen, setRenameOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const kebabRef = useRef(null);
@@ -67,7 +67,7 @@ export default function PlaylistView() {
         <button
           type="button"
           onClick={() => navigate("library")}
-          className="mt-2 rounded-full bg-accent px-5 py-2 text-sm font-semibold text-white shadow-glow transition hover:opacity-90"
+          className="btn-glossy mt-2 rounded-full px-5 py-2 text-sm font-semibold text-white transition hover:opacity-90"
         >
           Go to Library
         </button>
@@ -84,7 +84,7 @@ export default function PlaylistView() {
     if (!menuOpen && kebabRef.current) {
       const r = kebabRef.current.getBoundingClientRect();
       const placeAbove = r.bottom + 160 > window.innerHeight;
-      setCoords({ top: r.bottom, left: r.right, above: placeAbove });
+      setCoords({ top: r.bottom, right: window.innerWidth - r.right, above: placeAbove });
       setMenuOpen(true);
     } else {
       setMenuOpen(false);
@@ -114,9 +114,9 @@ export default function PlaylistView() {
       {/* Header */}
       <div className="relative mb-8 overflow-hidden rounded-3xl">
         <div className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-accent/25 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-28 left-12 h-72 w-72 rounded-full bg-fuchsia-600/15 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-28 left-12 h-72 w-72 rounded-full bg-accent/12 blur-3xl" />
         <div className="glass relative flex flex-col items-center gap-6 p-6 md:flex-row md:gap-8 md:p-8">
-          <div className="relative flex h-40 w-40 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-accent to-fuchsia-600 shadow-2xl ring-1 ring-white/10 md:h-52 md:w-52">
+          <div className="relative flex h-40 w-40 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-white/15 to-white/5 shadow-2xl ring-1 ring-white/10 md:h-52 md:w-52">
             <Music2 size={56} className="text-white/90" />
           </div>
           <div className="relative min-w-0 flex-1 text-center md:text-left">
@@ -134,7 +134,7 @@ export default function PlaylistView() {
                 type="button"
                 disabled={songs.length === 0}
                 onClick={() => play(songs[0], songs)}
-                className="inline-flex items-center gap-2 rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition hover:opacity-90 disabled:opacity-30"
+                className="inline-flex items-center gap-2 btn-glossy rounded-full px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-30"
               >
                 {listPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" />}
                 {listPlaying ? "Pause" : "Play"}
@@ -204,8 +204,7 @@ export default function PlaylistView() {
                 transition={{ duration: 0.15 }}
                 style={{
                   position: "fixed",
-                  left: coords.left,
-                  transform: "translateX(-100%)",
+                  right: coords.right,
                   top: coords.above ? undefined : coords.top,
                   bottom: coords.above ? window.innerHeight - coords.top : undefined,
                 }}
@@ -259,14 +258,19 @@ export default function PlaylistView() {
                 className="fixed inset-0 z-[90] bg-black/50 backdrop-blur-sm"
                 onClick={() => setConfirmDelete(false)}
               />
+              <div
+                className="fixed inset-0 z-[91] flex items-center justify-center p-4"
+                onClick={() => setConfirmDelete(false)}
+              >
               <motion.div
                 role="dialog"
                 aria-modal="true"
+                onClick={(e) => e.stopPropagation()}
                 initial={{ opacity: 0, scale: 0.95, y: 8 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 8 }}
                 transition={{ type: "spring", stiffness: 320, damping: 30 }}
-                className="glass-strong fixed left-1/2 top-1/2 z-[91] w-[90vw] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-white/10 p-6 shadow-glass"
+                className="glass-strong w-full max-w-sm rounded-3xl border border-white/10 p-6 shadow-glass"
               >
                 <h2 className="text-lg font-bold text-white">Delete playlist?</h2>
                 <p className="mt-2 text-sm text-white/60">
@@ -289,6 +293,7 @@ export default function PlaylistView() {
                   </button>
                 </div>
               </motion.div>
+              </div>
             </>
           )}
         </AnimatePresence>,

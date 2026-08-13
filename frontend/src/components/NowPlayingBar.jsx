@@ -56,6 +56,12 @@ export default function NowPlayingBar() {
     }
   };
 
+  // Only show "Resolving full song..." when we are ACTIVELY resolving AND
+  // audio hasn't started yet. Once isPlaying flips true (or streamUrl exists
+  // and progress > 0), audio is live so the message is misleading.
+  const showResolving =
+    isResolvingStream && !isPlaying && !(current?.streamUrl && progress > 0);
+
   return (
     <div className="glass fixed bottom-16 left-0 right-0 z-30 flex items-center gap-3 border-t px-3 py-2 md:bottom-0 md:gap-4 md:px-6 md:py-3">
       {/* Mobile thin progress line */}
@@ -85,7 +91,7 @@ export default function NowPlayingBar() {
             <button
               type="button"
               onClick={openFullscreen}
-              className="min-w-0 text-left"
+              className="min-w-0 flex-1 text-left"
               aria-label="Open full-screen player"
             >
               <p className="truncate text-sm font-semibold text-white" title={current.trackName}>
@@ -94,12 +100,16 @@ export default function NowPlayingBar() {
               <p className="truncate text-xs text-white/50" title={current.artistName}>
                 {current.artistName}
               </p>
-              {isResolvingStream && (
+              {showResolving && (
                 <p className="truncate text-[11px] text-accent/90">Resolving full song…</p>
               )}
-              {!isResolvingStream && streamError && (
+              {!showResolving && streamError && !isPlaying && (
                 <p className="truncate text-[11px] text-white/40">
-                  {streamError === "no_stream" ? "Stream unavailable" : "Playback error"}
+                  {streamError === "no_stream" || streamError === "not_found"
+                    ? "Stream unavailable"
+                    : streamError === "rate_limited"
+                    ? "Rate limited — retrying…"
+                    : "Playback error"}
                 </p>
               )}
             </button>
@@ -119,14 +129,14 @@ export default function NowPlayingBar() {
       </div>
 
       {/* Transport + progress */}
-      <div className="flex flex-[2] flex-col items-center gap-1.5">
+      <div className="flex flex-none flex-col items-center gap-1.5 md:flex-[2]">
         <div className="flex items-center gap-4">
           <button
             type="button"
             onClick={prev}
             disabled={!current}
             aria-label="Previous"
-            className="hidden text-white/70 transition hover:text-white disabled:opacity-30 sm:block"
+            className="text-white/70 transition hover:text-white disabled:opacity-30"
           >
             <SkipBack size={18} fill="currentColor" />
           </button>
@@ -135,12 +145,12 @@ export default function NowPlayingBar() {
             onClick={toggle}
             disabled={!current}
             aria-label={isPlaying ? "Pause" : "Play"}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-black transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-30"
+            className="btn-glossy flex h-10 w-10 items-center justify-center rounded-full transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-30"
           >
             {isPlaying ? (
-              <Pause size={18} fill="black" />
+              <Pause size={18} fill="currentColor" />
             ) : (
-              <Play size={18} fill="black" className="ml-0.5" />
+              <Play size={18} fill="currentColor" className="ml-0.5" />
             )}
           </button>
           <button
@@ -148,7 +158,7 @@ export default function NowPlayingBar() {
             onClick={next}
             disabled={!current}
             aria-label="Next"
-            className="hidden text-white/70 transition hover:text-white disabled:opacity-30 sm:block"
+            className="text-white/70 transition hover:text-white disabled:opacity-30"
           >
             <SkipForward size={18} fill="currentColor" />
           </button>
@@ -168,7 +178,10 @@ export default function NowPlayingBar() {
             onChange={(e) => seek(Number(e.target.value))}
             disabled={!current}
             aria-label="Seek preview"
-            className="h-1 w-full flex-1 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent disabled:cursor-not-allowed disabled:opacity-40"
+            className="h-1 w-full flex-1 cursor-pointer appearance-none rounded-full disabled:cursor-not-allowed disabled:opacity-40"
+            style={{
+              background: `linear-gradient(to right, #fa233b ${pct}%, rgba(255,255,255,0.18) ${pct}%)`,
+            }}
           />
           <span className="w-10 text-[11px] tabular-nums text-white/40">
             {formatTime(duration)}
@@ -217,7 +230,10 @@ export default function NowPlayingBar() {
             value={volume}
             onChange={(e) => setVolume(Number(e.target.value))}
             aria-label="Volume"
-            className="h-1 w-20 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent"
+            className="h-1 w-20 cursor-pointer appearance-none rounded-full"
+            style={{
+              background: `linear-gradient(to right, #fff ${Math.round((volume ?? 0) * 100)}%, rgba(255,255,255,0.18) ${Math.round((volume ?? 0) * 100)}%)`,
+            }}
           />
         </div>
 

@@ -8,6 +8,8 @@ export default function AlbumView() {
     <DetailView
       name={route.params.name}
       artist={route.params.artist}
+      year={route.params.year}
+      saavnId={route.params.saavnId}
       kind="album"
     />
   );

@@ -9,10 +9,9 @@ shape (`title`, `artist`, `album`, `artwork`, `durationMs`, `streamUrl`,
 
 Source of truth is now **Lyrica** (lyrics/metadata) + **JioSaavn** (audio).
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field
-
 
 class SyncedLine(BaseModel):
     """One timestamped lyric line, time in milliseconds."""
@@ -26,6 +25,10 @@ class LyricsPayload(BaseModel):
 
     synced: List[SyncedLine] = Field(default_factory=list)
     plain: Optional[str] = None
+    # Romanized (Latin-script) plain lyrics — present ONLY when a song has a
+    # genuine Telugu primary plus a distinct romanized version, so the UI can
+    # offer a Telugu/Romanized toggle just for those songs.
+    plainRoman: Optional[str] = None
     source: Optional[str] = None
     available: bool = False
 
@@ -44,6 +47,7 @@ class Song(BaseModel):
     title: str
     artist: str
     album: str = ""
+    year: Optional[int] = None
     artwork: str = ""
     durationMs: Optional[int] = None
     streamUrl: Optional[str] = None
@@ -80,6 +84,49 @@ class SongDetails(Song):
     metadata: Optional[Dict[str, Any]] = None
 
 
+class LyricVersion(BaseModel):
+    """One selectable lyric version for the version picker.
+
+    Carries the full (Telugu + optional romanized + optional synced) text so the
+    UI can preview it and switch the player to it, plus its running vote count.
+    """
+
+    id: str
+    source: str
+    label: str
+    hasSynced: bool = False
+    hasTelugu: bool = False
+    hasRoman: bool = False
+    synced: List[SyncedLine] = Field(default_factory=list)
+    plain: Optional[str] = None
+    plainRoman: Optional[str] = None
+    votes: int = 0
+    isChosen: bool = False
+
+
+class LyricsVersionsResponse(BaseModel):
+    """Envelope for /api/lyrics/versions — every lyric version for one song."""
+
+    songId: Optional[str] = None
+    chosen: Optional[str] = None
+    versions: List[LyricVersion] = Field(default_factory=list)
+
+
+class LyricsFeedbackRequest(BaseModel):
+    """Body for /api/lyrics/feedback — a listener's vote for the best version."""
+
+    songId: str
+    source: str
+
+
+class LyricsFeedbackResponse(BaseModel):
+    """Result of recording a vote — the updated per-source tallies."""
+
+    ok: bool = True
+    songId: str
+    votes: Dict[str, int] = Field(default_factory=dict)
+
+
 class SearchResponse(BaseModel):
     """Standard envelope returned by /api/search and /api/trending."""
 
@@ -98,6 +145,43 @@ class LookupResponse(BaseModel):
 
     type: str = "artist"
     title: str = ""
+    year: Optional[int] = None
+    subtitle: Optional[str] = None
     artworkUrl600: Optional[str] = None
     results: List[Song] = Field(default_factory=list)
+    source: str = "lyrica"
+
+
+class AlbumCard(BaseModel):
+    """One album in the browse grid — a canonical (movie, year) group."""
+
+    key: str
+    name: str
+    year: Optional[int] = None
+    artworkUrl600: Optional[str] = None
+    count: int = 0
+    singers: Optional[str] = None
+    # Present only for JioSaavn-sourced cards (new releases): the album id used
+    # to expand the card into tracks. None for our own (movie, year) albums.
+    albumId: Optional[str] = None
+
+
+class AlbumsResponse(BaseModel):
+    """Envelope for /api/albums — the browsable movie-album grid."""
+
+    count: int = 0
+    results: List[AlbumCard] = Field(default_factory=list)
+    source: str = "lyrica"
+
+
+class StreamResponse(BaseModel):
+    """Lightweight stream-only response for fast playback start."""
+
+    status: Literal["success", "not_found", "error"]
+    stream_url: str | None = None
+    artist: str
+    title: str
+    album: str | None = None
+    artwork: str | None = None
+    durationMs: int | None = None
     source: str = "lyrica"

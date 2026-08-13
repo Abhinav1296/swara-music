@@ -11,7 +11,7 @@ import TrackRow from "./TrackRow";
  * `artist` hint), then renders a large frosted header (artwork + title +
  * play-all) followed by the track list. `kind` is "artist" or "album".
  */
-export default function DetailView({ name, kind, artist }) {
+export default function DetailView({ name, kind, artist, year, saavnId }) {
   const { current, isPlaying, play, shuffle, toggleShuffle } = usePlayer();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -22,27 +22,27 @@ export default function DetailView({ name, kind, artist }) {
     setLoading(true);
     setError(null);
     setData(null);
-    if (!name) {
-      // No name to resolve → render the empty state instead of a doomed fetch.
+    if (!name && !saavnId) {
+      // Nothing to resolve → render the empty state instead of a doomed fetch.
       setLoading(false);
       setData({ type: kind, title: "", results: [] });
       return undefined;
     }
-    lookup({ name, type: kind, artist, limit: 60 })
+    lookup({ name, type: kind, artist, year, saavnId, limit: 60 })
       .then((d) => active && setData(d))
       .catch((e) => active && setError(e.message || "Failed to load."))
       .finally(() => active && setLoading(false));
     return () => {
       active = false;
     };
-  }, [name, kind, artist]);
+  }, [name, kind, artist, year, saavnId]);
 
   const tracks = data?.results || [];
   const listPlaying =
     tracks.length > 0 && current && tracks.some((t) => t.id === current.id) && isPlaying;
   const subtitle =
     kind === "album"
-      ? tracks[0]?.artistName || name
+      ? data?.subtitle || (year ? `${year} · ${tracks.length} songs` : `${tracks.length} songs`)
       : `${tracks.length} songs`;
 
   return (
@@ -59,7 +59,7 @@ export default function DetailView({ name, kind, artist }) {
       {/* Header */}
       <div className="relative mb-8 overflow-hidden rounded-3xl">
         <div className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-accent/25 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-28 left-12 h-72 w-72 rounded-full bg-fuchsia-600/15 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-28 left-12 h-72 w-72 rounded-full bg-accent/12 blur-3xl" />
         <div className="glass relative flex flex-col items-center gap-6 p-6 md:flex-row md:gap-8 md:p-8">
           <img
             src={data?.artworkUrl600 || ""}
@@ -79,7 +79,7 @@ export default function DetailView({ name, kind, artist }) {
                 type="button"
                 disabled={tracks.length === 0}
                 onClick={() => play(tracks[0], tracks)}
-                className="inline-flex items-center gap-2 rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition hover:opacity-90 disabled:opacity-30"
+                className="inline-flex items-center gap-2 btn-glossy rounded-full px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-30"
               >
                 {listPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" />}
                 {listPlaying ? "Pause" : "Play"}

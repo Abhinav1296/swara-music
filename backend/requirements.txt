@@ -1,7 +1,28 @@
-# Telugu Apple Music — Backend dependencies
+# Swara — backend + scraper dependencies
 # Python 3.10+
 
-fastapi>=0.110,<1.0
-uvicorn[standard]>=0.27
-httpx>=0.26
-python-dotenv>=1.0
+# Web app
+fastapi>=0.139,<1.0
+uvicorn[standard]>=0.51
+httpx>=0.28
+python-dotenv>=1.2
+
+# Catalog storage (MongoDB Atlas; [srv] pulls dnspython for the SRV connection string)
+pymongo[srv]>=4.17
+
+# JioSaavn client — local DES decrypt of the encrypted media URL (no external proxy)
+pycryptodome>=3.23
+
+# Lyrics scraping — TLS-fingerprint fetcher + HTML parsing
+curl_cffi>=0.16
+beautifulsoup4>=4.15
+
+# Auth — verify Google ID tokens + sign our own session JWTs
+google-auth>=2.35
+pyjwt>=2.10
+# google-auth's default transport (used to fetch Google's signing certs) needs
+# the `requests` library.
+requests>=2.32
+
+# Dev / testing only (in-memory Mongo)
+mongomock>=4.3

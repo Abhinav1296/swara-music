@@ -3,14 +3,14 @@ import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
-  ExternalLink,
+  Layers,
   ListMusic,
   Loader2,
+  MessageSquareQuote,
   Mic2,
   Music2,
   Pause,
   Play,
-  RefreshCw,
   Repeat,
   Repeat1,
   Shuffle,
@@ -25,8 +25,10 @@ import { usePlayer } from "../context/PlayerContext";
 import LikeButton from "./LikeButton";
 import VideoPanel from "./VideoPanel";
 import { formatTime } from "../utils/format";
-import { buildExternalLinks, EXTERNAL_LINKS } from "../utils/externalLinks";
 import { resolveActiveLine } from "../lyrics/lyrics";
+import SyncedLyrics from "./SyncedLyrics";
+import TrackMenu from "./TrackMenu";
+import LyricVersions from "./LyricVersions";
 
 /**
  * Immersive full-screen "Now Playing" view. Opens from the mini bar with a
@@ -50,7 +52,6 @@ export default function FullScreenPlayer() {
     streamError,
     lyrics,
     lyricsStatus,
-    retry,
     toggle,
     next,
     prev,
@@ -60,21 +61,22 @@ export default function FullScreenPlayer() {
     cycleRepeat,
     closeFullscreen,
     play,
+    retry,
     pendingTabRef,
   } = usePlayer();
 
-  const [rightTab, setRightTab] = useState("upnext"); // "upnext" | "lyrics" | "video"
-  const containerRef = useRef(null);
-  const lineRefs = useRef([]);
-  // Throttle/avoid scroll spam: remember the last line we scrolled to and the
-  // last time we did a smooth scroll (so we don't fire constant animations).
-  const lastScrollIndexRef = useRef(-2);
-  const lastScrollTimeRef = useRef(0);
-  // Audio/video coordination: when the Video tab is open we pause the in-app
-  // <audio> so the user never hears two sources at once. These refs let us
-  // restore the previous play state when the tab/video is closed.
+  const [rightPanel, setRightPanel] = useState("lyrics"); // "none" | "lyrics" | "upnext" | "video"
+  const togglePanel = (p) => setRightPanel((cur) => (cur === p ? "none" : p));
+  const [lyricScript, setLyricScript] = useState("telugu"); // "telugu" | "roman"
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  // A version the listener picked to view instead of the default (normalized
+  // lyrics + its label). Null = show the backend's default lyrics.
+  const [overrideLyrics, setOverrideLyrics] = useState(null);
+  const [overrideLabel, setOverrideLabel] = useState(null);
+  // Video↔audio coordination: when the Video panel is open we pause the in-app
+  // <audio> so two sources never play at once; restore on leave/close.
   const videoPausedAudioRef = useRef(false);
-  const prevTabRef = useRef("upnext");
+  const prevPanelRef = useRef("lyrics");
 
   // Esc closes; lock body scroll while open.
   useEffect(() => {
@@ -84,45 +86,38 @@ export default function FullScreenPlayer() {
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen, closeFullscreen]);
 
-  const activeIndex =
-    lyrics && lyrics.kind === "timed" ? resolveActiveLine(lyrics.lines, progress) : -1;
-
-  // Honor a tab requested when the player was opened (e.g. TrackMenu's
-  // "Play Video Song" → openFullscreen("video")). Only jumps on open, and only
-  // when a specific tab was actually requested, so reopening keeps the last tab.
+  // Honor a panel requested when the player opened (TrackMenu "Play Video Song"
+  // → openFullscreen("video")). Only jumps when a specific tab was requested.
   useEffect(() => {
     if (!fullscreen) return undefined;
     const t = pendingTabRef?.current;
     if (t) {
-      setRightTab(t);
+      setRightPanel(t);
       pendingTabRef.current = null;
     }
     return undefined;
   }, [fullscreen, pendingTabRef]);
 
-  // Pause the in-app audio while the Video tab is open (so we never stack the
-  // JioSaavn audio under the YouTube video), and restore it when the tab or the
-  // player closes. We only auto-resume if *we* paused it and it's still paused —
-  // a manual play/pause by the user on the video tab is always respected.
+  // Pause in-app audio while the Video panel is open; restore when leaving it.
+  // Only auto-resume if *we* paused it and it's still paused (respect manual
+  // play/pause done while on the video).
   useEffect(() => {
-    const wasVideo = prevTabRef.current === "video";
-    const isVideo = rightTab === "video";
+    const wasVideo = prevPanelRef.current === "video";
+    const isVideo = rightPanel === "video";
     if (isVideo && !wasVideo && fullscreen) {
       if (isPlaying) {
         videoPausedAudioRef.current = true;
         toggle();
       }
     } else if (!isVideo && wasVideo) {
-      if (videoPausedAudioRef.current && !isPlaying) {
-        toggle();
-      }
+      if (videoPausedAudioRef.current && !isPlaying) toggle();
       videoPausedAudioRef.current = false;
     }
-    prevTabRef.current = rightTab;
+    prevPanelRef.current = rightPanel;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rightTab, fullscreen, isPlaying, toggle]);
+  }, [rightPanel, fullscreen, isPlaying, toggle]);
 
-  // If the player is closed while the Video tab is open, restore audio too.
+  // If the player closes while the Video panel is open, restore audio too.
   useEffect(() => {
     if (!fullscreen && videoPausedAudioRef.current && !isPlaying) {
       videoPausedAudioRef.current = false;
@@ -131,39 +126,211 @@ export default function FullScreenPlayer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullscreen, isPlaying, toggle]);
 
-  // Smoothly scroll the active lyric line into the vertical center. We only
-  // scroll when the active line actually changes (jitter-free), and throttle
-  // to at most one smooth scroll per ~250ms — rapid line changes within that
-  // window get a non-animated jump so we never fall far behind or stack
-  // animations. Re-runs when the lyrics tab opens so we land on the right line.
+  // Reset per-track lyric UI state (script, chosen version, open picker).
   useEffect(() => {
-    if (activeIndex < 0 || !containerRef.current) return;
-    const el = lineRefs.current[activeIndex];
-    if (!el) return;
-    if (activeIndex === lastScrollIndexRef.current) return; // no re-scroll
-    const now = Date.now();
-    const since = now - lastScrollTimeRef.current;
-    if (since < 250) {
-      el.scrollIntoView({ behavior: "auto", block: "center" });
-    } else {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-    lastScrollIndexRef.current = activeIndex;
-    lastScrollTimeRef.current = now;
-  }, [activeIndex, lyrics, rightTab]);
+    setLyricScript("telugu");
+    setOverrideLyrics(null);
+    setOverrideLabel(null);
+    setVersionsOpen(false);
+  }, [current?.id]);
+
+  // What the lyrics panel actually shows: a picked version if any, else default.
+  const shownLyrics = overrideLyrics || lyrics;
+  const shownStatus = overrideLyrics ? "available" : lyricsStatus;
+
+  const useVersion = (norm, label) => {
+    if (!norm) return;
+    setOverrideLyrics(norm);
+    setOverrideLabel(label || null);
+    setLyricScript("telugu");
+    setVersionsOpen(false);
+  };
+  const resetVersion = () => {
+    setOverrideLyrics(null);
+    setOverrideLabel(null);
+  };
+
+  const activeIndex =
+    shownLyrics && shownLyrics.kind === "timed"
+      ? resolveActiveLine(shownLyrics.lines, progress)
+      : -1;
 
   const pct = duration ? Math.min(100, (progress / duration) * 100) : 0;
+  const volPct = Math.round((volume ?? 0) * 100);
   const art = current?.artworkUrl600 || current?.artworkUrl100;
-  const external = buildExternalLinks(current);
-  const tabCls = (active) =>
-    `flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition ${
-      active ? "bg-white/15 text-white" : "text-white/55 hover:text-white"
+  const panelBtn = (active) =>
+    `flex flex-1 items-center justify-center gap-1.5 rounded-2xl px-3 py-2.5 text-sm font-semibold transition ${
+      active
+        ? "glass-glossy text-white ring-1 ring-accent/60 shadow-glow"
+        : "glass-glossy text-white/60 hover:text-white"
+    }`;
+
+  // Romanized lyrics toggle — only when the backend supplied a distinct roman
+  // version. Roman has no karaoke timing, so it always renders as plain lines.
+  const hasRoman = !!(shownLyrics && Array.isArray(shownLyrics.roman) && shownLyrics.roman.length);
+  const showRoman = hasRoman && lyricScript === "roman";
+  const scriptBtn = (active) =>
+    `rounded-full px-3 py-1 text-xs font-semibold transition ${
+      active ? "bg-white/15 text-white ring-1 ring-accent/50" : "text-white/50 hover:text-white/85"
     }`;
 
   const playFromUpNext = (song) => {
     const context = [current, ...upcoming].filter(Boolean);
     play(song, context);
   };
+
+  // The Up Next / Lyrics body — written once, reused by the desktop side column
+  // and the mobile full-screen sheet so the two never drift apart.
+  const renderPanel = () =>
+    rightPanel === "video" ? (
+      <div className="flex min-h-[55vh] flex-1 flex-col md:min-h-0">
+        <VideoPanel current={current} />
+      </div>
+    ) : rightPanel === "upnext" ? (
+      <div className="no-scrollbar flex-1 space-y-1 overflow-y-auto rounded-2xl">
+        {upcoming.length === 0 ? (
+          <div className="glass flex flex-col items-center gap-2 rounded-2xl py-12 text-center">
+            <Music2 size={22} className="text-white/40" />
+            <p className="text-sm text-white/50">Nothing queued next.</p>
+            <p className="max-w-[15rem] text-xs text-white/30">
+              Use “Add to Queue” on any song to line it up here.
+            </p>
+          </div>
+        ) : (
+          upcoming.map((s, i) => (
+            <button
+              key={`${s.id}-${i}`}
+              type="button"
+              onClick={() => playFromUpNext(s)}
+              className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-white/10"
+            >
+              <img
+                src={s.artworkUrl100}
+                alt=""
+                className="h-11 w-11 shrink-0 rounded-lg object-cover"
+              />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-white">{s.trackName}</p>
+                <p className="truncate text-xs text-white/50">{s.artistName}</p>
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+    ) : (
+      <div className="relative flex min-h-[55vh] flex-1 flex-col md:min-h-0">
+        {/* Header: Telugu/Romanized switch (left) + Versions picker (right). */}
+        {shownStatus === "available" && (
+          <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              {hasRoman && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setLyricScript("telugu")}
+                    aria-pressed={!showRoman}
+                    className={scriptBtn(!showRoman)}
+                  >
+                    తెలుగు
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLyricScript("roman")}
+                    aria-pressed={showRoman}
+                    className={scriptBtn(showRoman)}
+                  >
+                    Romanized
+                  </button>
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setVersionsOpen(true)}
+              className="glass-glossy flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold text-white/70 transition hover:text-white"
+            >
+              <Layers size={14} /> Versions
+            </button>
+          </div>
+        )}
+
+        {/* Which version is showing, when it isn't the default. */}
+        {overrideLabel && (
+          <div className="mb-2 flex shrink-0 items-center gap-2 text-[11px] text-white/50">
+            <span>
+              Showing <span className="text-white/80">{overrideLabel}</span>
+            </span>
+            <button
+              type="button"
+              onClick={resetVersion}
+              className="font-semibold text-accent transition hover:underline"
+            >
+              Reset to default
+            </button>
+          </div>
+        )}
+
+        <div className="relative min-h-0 flex-1">
+          {shownStatus === "loading" && (
+            <div className="space-y-5 py-8">
+              {Array.from({ length: 7 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-8 animate-pulse rounded-lg bg-white/10"
+                  style={{ width: `${55 + ((i * 7) % 40)}%` }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Romanized view is always plain (no karaoke timing for roman). */}
+          {shownStatus === "available" && showRoman && (
+            <div className="no-scrollbar h-full space-y-4 overflow-y-auto py-6">
+              {shownLyrics.roman.map((l, i) => (
+                <p key={i} className="text-2xl font-semibold leading-snug text-white/80">
+                  {l.text}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {shownStatus === "available" && !showRoman && shownLyrics?.kind === "timed" && (
+            <SyncedLyrics
+              lines={shownLyrics.lines}
+              activeIndex={activeIndex}
+              progress={progress}
+              duration={duration}
+              onSeek={seek}
+            />
+          )}
+
+          {shownStatus === "available" && !showRoman && shownLyrics?.kind === "plain" && (
+            <div className="no-scrollbar h-full space-y-4 overflow-y-auto py-6">
+              {shownLyrics.lines.map((l, i) => (
+                <p key={i} className="text-2xl font-semibold leading-snug text-white/80">
+                  {l.text}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {shownStatus === "unavailable" && (
+            <div className="glass flex h-full flex-col items-center justify-center gap-2 rounded-2xl py-12 text-center">
+              <Mic2 size={24} className="text-white/40" />
+              <p className="text-sm text-white/60">Lyrics not available</p>
+              <p className="max-w-[15rem] text-xs text-white/30">
+                No synced or plain lyrics were found for this track.
+              </p>
+            </div>
+          )}
+          {shownStatus === "idle" && (
+            <div className="flex h-full items-center justify-center py-12 text-center">
+              <p className="text-xs text-white/30">No track loaded.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
 
   return createPortal(
     <AnimatePresence>
@@ -177,12 +344,17 @@ export default function FullScreenPlayer() {
           role="dialog"
           aria-modal="true"
         >
-          {/* Blurred artwork backdrop */}
-          <div className="absolute inset-0 -z-10">
+          {/* Ambient color-wash backdrop — saturated bleed from the artwork,
+              darkened toward the corners (Apple's lyrics ambiance). */}
+          <div className="absolute inset-0 -z-10 bg-black">
             {art && (
-              <img src={art} alt="" className="h-full w-full scale-125 object-cover blur-3xl" />
+              <img
+                src={art}
+                alt=""
+                className="h-full w-full scale-150 object-cover opacity-70 blur-[120px] saturate-150"
+              />
             )}
-            <div className="absolute inset-0 bg-black/70 backdrop-blur-2xl" />
+            <div className="absolute inset-0 bg-gradient-to-br from-black/30 via-black/55 to-black/80" />
           </div>
 
           {/* Top bar */}
@@ -191,29 +363,28 @@ export default function FullScreenPlayer() {
               type="button"
               onClick={closeFullscreen}
               aria-label="Minimize player"
-              className="rounded-full bg-white/10 p-2.5 text-white/80 transition hover:bg-white/20 hover:text-white"
+              className="glass-glossy rounded-full p-2.5 text-white/80 transition hover:text-white"
             >
               <ChevronDown size={22} />
             </button>
             <p className="text-xs font-semibold uppercase tracking-widest text-white/60">
               Now Playing
             </p>
-            <button
-              type="button"
-              onClick={closeFullscreen}
-              aria-label="Close player"
-              className="rounded-full bg-white/10 p-2.5 text-white/80 transition hover:bg-white/20 hover:text-white md:hidden"
-            >
-              <X size={20} />
-            </button>
-            <span className="hidden w-10 md:block" />
+            <TrackMenu
+              song={current}
+              elevated
+              iconSize={20}
+              triggerClassName="glass-glossy rounded-full p-2.5 text-white/80 transition hover:text-white"
+            />
           </div>
 
           {/* Content: art + controls (left), up next / lyrics (right on lg) */}
           <div className="flex flex-1 flex-col gap-8 overflow-y-auto px-6 pb-10 md:flex-row md:items-center md:justify-center md:gap-14 md:px-12">
-            {/* Left: artwork + transport */}
-            <div className="mx-auto flex w-full max-w-md flex-col items-center">
-              <div className="relative w-full max-w-[min(70vw,22rem)]">
+            {/* Left: artwork + transport. `my-auto` vertically centers the column
+                on mobile so the controls fill the screen instead of piling at the
+                top (collapses to top-aligned if a small phone ever overflows). */}
+            <div className="mx-auto my-auto flex w-full max-w-md flex-col items-center md:mx-0">
+              <div className="relative w-full max-w-[min(76vw,22rem)]">
                 <motion.img
                   key={current.id}
                   initial={{ scale: 0.92, opacity: 0 }}
@@ -255,9 +426,9 @@ export default function FullScreenPlayer() {
                     value={Math.min(progress, duration || 0)}
                     onChange={(e) => seek(Number(e.target.value))}
                     aria-label="Seek preview"
-                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/15 accent-accent"
+                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full"
                     style={{
-                      background: `linear-gradient(to right, #fa233b ${pct}%, rgba(255,255,255,0.15) ${pct}%)`,
+                      background: `linear-gradient(to right, #fa233b ${pct}%, rgba(255,255,255,0.2) ${pct}%)`,
                     }}
                   />
                 </div>
@@ -293,12 +464,12 @@ export default function FullScreenPlayer() {
                     type="button"
                     onClick={toggle}
                     aria-label={isPlaying ? "Pause" : "Play"}
-                    className="flex h-16 w-16 items-center justify-center rounded-full bg-white text-black shadow-glow transition hover:scale-105"
+                    className="btn-glossy flex h-16 w-16 items-center justify-center rounded-full transition hover:scale-105"
                   >
                     {isPlaying ? (
-                      <Pause size={28} fill="black" />
+                      <Pause size={28} fill="currentColor" />
                     ) : (
-                      <Play size={28} fill="black" className="ml-1" />
+                      <Play size={28} fill="currentColor" className="ml-1" />
                     )}
                   </button>
                   <button
@@ -340,181 +511,151 @@ export default function FullScreenPlayer() {
                   value={volume}
                   onChange={(e) => setVolume(Number(e.target.value))}
                   aria-label="Volume"
-                  className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/15 accent-accent"
+                  className="h-1 flex-1 cursor-pointer appearance-none rounded-full"
+                  style={{
+                    background: `linear-gradient(to right, #fff ${volPct}%, rgba(255,255,255,0.18) ${volPct}%)`,
+                  }}
                 />
               </div>
 
-              {/* External "listen full song" links (legal bridge) */}
-              <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-                {EXTERNAL_LINKS.map(({ key, label }) => (
-                  <a
-                    key={key}
-                    href={external[key]}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/80 transition hover:bg-white/20 hover:text-white"
-                  >
-                    <ExternalLink size={13} /> {label}
-                  </a>
-                ))}
+              {/* Lyrics / Up Next / Video toggles — separate buttons, mobile + desktop.
+                  Toggling the active one off returns to the album-only view. */}
+              <div className="mt-6 flex w-full items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => togglePanel("lyrics")}
+                  aria-pressed={rightPanel === "lyrics"}
+                  className={panelBtn(rightPanel === "lyrics")}
+                >
+                  <MessageSquareQuote size={17} /> Lyrics
+                </button>
+                <button
+                  type="button"
+                  onClick={() => togglePanel("upnext")}
+                  aria-pressed={rightPanel === "upnext"}
+                  className={panelBtn(rightPanel === "upnext")}
+                >
+                  <ListMusic size={17} /> Up Next
+                </button>
+                <button
+                  type="button"
+                  onClick={() => togglePanel("video")}
+                  aria-pressed={rightPanel === "video"}
+                  className={panelBtn(rightPanel === "video")}
+                >
+                  <Video size={17} /> Video
+                </button>
               </div>
 
               {/* Stream resolution status (glass error / resolving states) */}
-              {streamError && upcoming.length > 0 && (
-                <div className="mt-3 rounded-full bg-white/10 px-4 py-1.5 text-center text-xs text-white/70">
-                  {streamError === "no_stream"
-                    ? "Full song unavailable — try a link above"
-                    : streamError === "not_found"
-                    ? "Track not found — skipping"
-                    : "Couldn’t reach the music service — skipping"}
-                </div>
-              )}
-              {streamError && upcoming.length === 0 && (
-                <div className="glass mt-3 flex flex-col items-center gap-2 rounded-2xl px-5 py-3 text-center">
-                  <p className="text-sm text-white/80">
+              {streamError && (
+                <div className="mt-3 flex items-center justify-center gap-3 rounded-full bg-white/10 px-4 py-1.5 text-xs text-white/70">
+                  <span>
                     {streamError === "no_stream"
                       ? "Full song unavailable"
                       : streamError === "not_found"
                       ? "Track not found"
                       : "Couldn’t reach the music service"}
-                  </p>
-                  <p className="max-w-[16rem] text-xs text-white/40">
-                    Nothing queued next — retry, or listen via a link above.
-                  </p>
+                  </span>
+                  {retry && streamError !== "not_found" && (
+                    <button
+                      type="button"
+                      onClick={() => retry()}
+                      className="font-semibold text-accent transition hover:underline"
+                    >
+                      Retry
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Right: Lyrics / Up Next — desktop inline column.
+                On mobile this is hidden; the slide-up sheet below takes over. */}
+            {rightPanel !== "none" && (
+              <div className="hidden w-full max-w-md flex-col md:mx-0 md:flex md:h-[74vh] lg:max-w-2xl">
+                {renderPanel()}
+              </div>
+            )}
+          </div>
+
+          {/* Mobile: Lyrics / Up Next as a full-screen slide-up sheet (Apple-style).
+              Same body as the desktop column, but presented as an overlay so you
+              never have to scroll the player to reach it. */}
+          <AnimatePresence>
+            {rightPanel !== "none" && (
+              <motion.div
+                key="mobile-panel"
+                initial={{ y: "100%" }}
+                animate={{ y: 0 }}
+                exit={{ y: "100%" }}
+                transition={{ type: "spring", stiffness: 300, damping: 34 }}
+                className="absolute inset-0 z-[85] flex flex-col md:hidden"
+              >
+                <div className="absolute inset-0 -z-10 overflow-hidden bg-black">
+                  {art && (
+                    <img
+                      src={art}
+                      alt=""
+                      className="h-full w-full scale-150 object-cover opacity-60 blur-[120px] saturate-150"
+                    />
+                  )}
+                  <div className="absolute inset-0 bg-black/55" />
+                </div>
+
+                <div className="flex items-center gap-2 px-5 pb-3 pt-5">
+                  <div className="flex flex-1 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRightPanel("lyrics")}
+                      aria-pressed={rightPanel === "lyrics"}
+                      className={panelBtn(rightPanel === "lyrics")}
+                    >
+                      <MessageSquareQuote size={17} /> Lyrics
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRightPanel("upnext")}
+                      aria-pressed={rightPanel === "upnext"}
+                      className={panelBtn(rightPanel === "upnext")}
+                    >
+                      <ListMusic size={17} /> Up Next
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRightPanel("video")}
+                      aria-pressed={rightPanel === "video"}
+                      className={panelBtn(rightPanel === "video")}
+                    >
+                      <Video size={17} /> Video
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    onClick={retry}
-                    className="mt-1 flex items-center gap-1.5 rounded-full bg-white/15 px-4 py-1.5 text-xs font-medium text-white transition hover:bg-white/25"
+                    onClick={() => setRightPanel("none")}
+                    aria-label="Close"
+                    className="glass-glossy shrink-0 rounded-full p-2.5 text-white/80 transition hover:text-white"
                   >
-                    <RefreshCw size={14} /> Retry
+                    <X size={20} />
                   </button>
                 </div>
-              )}
-            </div>
 
-            {/* Right: Up Next / Lyrics */}
-            <div className="mx-auto flex w-full max-w-md flex-col md:h-[70vh]">
-              <div className="mb-3 flex items-center gap-1 self-start rounded-full bg-white/5 p-1">
-                <button
-                  type="button"
-                  onClick={() => setRightTab("upnext")}
-                  className={tabCls(rightTab === "upnext")}
-                >
-                  <ListMusic size={15} /> Up Next
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRightTab("lyrics")}
-                  className={tabCls(rightTab === "lyrics")}
-                >
-                  <Mic2 size={15} /> Lyrics
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRightTab("video")}
-                  className={tabCls(rightTab === "video")}
-                >
-                  <Video size={15} /> Video
-                </button>
-              </div>
-
-              {rightTab === "upnext" ? (
-                <div className="no-scrollbar flex-1 space-y-1 overflow-y-auto rounded-2xl">
-                  {upcoming.length === 0 ? (
-                    <div className="glass flex flex-col items-center gap-2 rounded-2xl py-12 text-center">
-                      <Music2 size={22} className="text-white/40" />
-                      <p className="text-sm text-white/50">Nothing queued next.</p>
-                      <p className="max-w-[15rem] text-xs text-white/30">
-                        Use “Add to Queue” on any song to line it up here.
-                      </p>
-                    </div>
-                  ) : (
-                    upcoming.map((s, i) => (
-                      <button
-                        key={`${s.id}-${i}`}
-                        type="button"
-                        onClick={() => playFromUpNext(s)}
-                        className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-white/10"
-                      >
-                        <img
-                          src={s.artworkUrl100}
-                          alt=""
-                          className="h-11 w-11 shrink-0 rounded-lg object-cover"
-                        />
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-white">{s.trackName}</p>
-                          <p className="truncate text-xs text-white/50">{s.artistName}</p>
-                        </div>
-                      </button>
-                    ))
-                  )}
+                <div className="flex flex-1 flex-col overflow-hidden px-5 pb-8">
+                  {renderPanel()}
                 </div>
-              ) : rightTab === "video" ? (
-                <div className="no-scrollbar relative flex-1 overflow-y-auto rounded-2xl px-1">
-                  <VideoPanel current={current} />
-                </div>
-              ) : (
-                <div ref={containerRef} className="no-scrollbar relative flex-1 overflow-y-auto rounded-2xl px-1">
-                  {lyricsStatus === "loading" && (
-                    <div className="space-y-3 py-2">
-                      {Array.from({ length: 8 }).map((_, i) => (
-                        <div
-                          key={i}
-                          className="h-4 animate-pulse rounded bg-white/10"
-                          style={{ width: `${55 + ((i * 7) % 40)}%` }}
-                        />
-                      ))}
-                    </div>
-                  )}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-                  {lyricsStatus === "available" && lyrics?.kind === "timed" && (
-                    <div className="space-y-3 py-2">
-                      {lyrics.lines.map((l, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          ref={(el) => (lineRefs.current[i] = el)}
-                          onClick={() => seek(Math.max(0, l.time))}
-                          className={`block w-full text-left text-lg leading-relaxed transition ${
-                            i === activeIndex
-                              ? "font-semibold text-white"
-                              : "text-white/40 hover:text-white/70"
-                          }`}
-                        >
-                          {l.text || "♪"}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {lyricsStatus === "available" && lyrics?.kind === "plain" && (
-                    <div className="space-y-3 py-2">
-                      {lyrics.lines.map((l, i) => (
-                        <p key={i} className="text-lg leading-relaxed text-white/70">
-                          {l.text}
-                        </p>
-                      ))}
-                    </div>
-                  )}
-
-                  {lyricsStatus === "unavailable" && (
-                    <div className="glass flex h-full flex-col items-center justify-center gap-2 rounded-2xl py-12 text-center">
-                      <Mic2 size={24} className="text-white/40" />
-                      <p className="text-sm text-white/60">Lyrics not available</p>
-                      <p className="max-w-[15rem] text-xs text-white/30">
-                        No synced or plain lyrics were found for this track.
-                      </p>
-                    </div>
-                  )}
-                  {lyricsStatus === "idle" && (
-                    <div className="flex h-full items-center justify-center py-12 text-center">
-                      <p className="text-xs text-white/30">No track loaded.</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+          {/* Lyrics version picker (portals to <body> above the player) */}
+          {versionsOpen && current && (
+            <LyricVersions
+              song={current}
+              currentSource={shownLyrics?.source || null}
+              onUse={useVersion}
+              onClose={() => setVersionsOpen(false)}
+            />
+          )}
         </motion.div>
       )}
     </AnimatePresence>,
