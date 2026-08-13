@@ -112,7 +112,7 @@ export default function SyncedLyrics({
               ref={(el) => (lineRefs.current[i] = el)}
               onClick={() => onSeek?.(l.time)}
               className="block w-full py-1.5 text-left font-bold leading-[1.3] tracking-tight
-                text-[1.35rem] sm:text-[1.6rem] lg:text-[1.9rem]"
+                text-[1.3rem] sm:text-[1.5rem] lg:text-[1.7rem]"
               style={active ? { textShadow: "0 0 26px rgba(255,255,255,0.18)" } : undefined}
             >
               {active ? (

@@ -25,6 +25,10 @@ class LyricsPayload(BaseModel):
 
     synced: List[SyncedLine] = Field(default_factory=list)
     plain: Optional[str] = None
+    # Romanized (Latin-script) plain lyrics — present ONLY when a song has a
+    # genuine Telugu primary plus a distinct romanized version, so the UI can
+    # offer a Telugu/Romanized toggle just for those songs.
+    plainRoman: Optional[str] = None
     source: Optional[str] = None
     available: bool = False
 
@@ -78,6 +82,49 @@ class SongDetails(Song):
     lyrics: LyricsPayload = Field(default_factory=LyricsPayload)
     mood: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
+
+
+class LyricVersion(BaseModel):
+    """One selectable lyric version for the version picker.
+
+    Carries the full (Telugu + optional romanized + optional synced) text so the
+    UI can preview it and switch the player to it, plus its running vote count.
+    """
+
+    id: str
+    source: str
+    label: str
+    hasSynced: bool = False
+    hasTelugu: bool = False
+    hasRoman: bool = False
+    synced: List[SyncedLine] = Field(default_factory=list)
+    plain: Optional[str] = None
+    plainRoman: Optional[str] = None
+    votes: int = 0
+    isChosen: bool = False
+
+
+class LyricsVersionsResponse(BaseModel):
+    """Envelope for /api/lyrics/versions — every lyric version for one song."""
+
+    songId: Optional[str] = None
+    chosen: Optional[str] = None
+    versions: List[LyricVersion] = Field(default_factory=list)
+
+
+class LyricsFeedbackRequest(BaseModel):
+    """Body for /api/lyrics/feedback — a listener's vote for the best version."""
+
+    songId: str
+    source: str
+
+
+class LyricsFeedbackResponse(BaseModel):
+    """Result of recording a vote — the updated per-source tallies."""
+
+    ok: bool = True
+    songId: str
+    votes: Dict[str, int] = Field(default_factory=dict)
 
 
 class SearchResponse(BaseModel):

@@ -207,10 +207,97 @@ export function lookup({ name, type = "artist", artist, year, saavnId, limit = 5
   const params = new URLSearchParams({ type, limit: String(limit) });
   if (name) params.set("name", name);
   if (artist) params.set("artist", artist);
-  if (year !== undefined && year !== null && year !== "") params.set("year", String(year));
+  // Only forward a real, finite year — never the strings "undefined"/"null"/"NaN"
+  // that a stale URL or a null-ish param can produce, which make the backend's
+  // `year: int` query validation fail with a 422 ("Couldn't load this album").
+  const yearNum = Number(year);
+  if (year !== undefined && year !== null && year !== "" && Number.isFinite(yearNum)) {
+    params.set("year", String(yearNum));
+  }
   if (saavnId) params.set("saavnId", String(saavnId));
   return getJson(`/lookup?${params.toString()}`).then((d) => ({
     ...d,
     results: (d.results || []).map(normalizeTrack),
   }));
+}
+
+/**
+ * Fetch every stored lyric version for a song (for the version picker).
+ * Prefer the exact `id` (song _id); artist/song/url are fallbacks.
+ * Returns { songId, chosen, versions:[{ source, label, hasSynced, hasTelugu,
+ * hasRoman, synced, plain, plainRoman, votes, isChosen }] }.
+ */
+export function getLyricVersions({ id, artist, song, url, signal } = {}) {
+  const params = new URLSearchParams();
+  if (id) params.set("id", id);
+  if (artist) params.set("artist", artist);
+  if (song) params.set("song", song);
+  if (url) params.set("url", url);
+  return getJson(`/lyrics/versions?${params.toString()}`, { signal });
+}
+
+/**
+ * Record a listener's vote for the lyric version that matches best.
+ * Returns { ok, songId, votes:{ [source]: count } }.
+ */
+// ---- Auth ---------------------------------------------------------------- //
+const _authHeader = (token) => (token ? { Authorization: `Bearer ${token}` } : {});
+
+async function _readErr(res) {
+  let detail = `Request failed (${res.status})`;
+  try {
+    const b = await res.json();
+    if (b?.detail) detail = b.detail;
+  } catch {
+    /* ignore non-JSON error bodies */
+  }
+  return _makeError(res, detail);
+}
+
+/** Exchange a Google ID token for a Swara session. Returns { token, user }. */
+export async function googleLogin(idToken) {
+  const res = await fetch(`${BASE}/auth/google`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idToken }),
+  });
+  if (!res.ok) throw await _readErr(res);
+  return res.json();
+}
+
+/** Fetch the current user for a session token. Returns { user }. */
+export async function fetchMe(token) {
+  const res = await fetch(`${BASE}/auth/me`, { headers: _authHeader(token) });
+  if (!res.ok) throw await _readErr(res);
+  return res.json();
+}
+
+/** Update the current user's profile (name / favoriteSingers). Returns { user }. */
+export async function updateProfile(token, patch) {
+  const res = await fetch(`${BASE}/auth/profile`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ..._authHeader(token) },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw await _readErr(res);
+  return res.json();
+}
+
+export async function sendLyricFeedback({ songId, source }) {
+  const res = await fetch(`${BASE}/lyrics/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ songId, source }),
+  });
+  if (!res.ok) {
+    let detail = `Request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      /* ignore non-JSON error bodies */
+    }
+    throw _makeError(res, detail);
+  }
+  return res.json();
 }

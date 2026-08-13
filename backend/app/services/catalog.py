@@ -187,7 +187,9 @@ def _lyrics_payload(doc: Dict[str, Any]) -> Dict[str, Any]:
     chosen = by_source.get(doc.get("chosen_source")) or min(
         versions, key=lambda v: v.get("priority", 99)
     )
-    plain = (chosen.get("text_telugu") or chosen.get("text_roman") or "").strip() or None
+    text_telugu = (chosen.get("text_telugu") or "").strip()
+    text_roman = (chosen.get("text_roman") or "").strip()
+    plain = text_telugu or text_roman or None
     source_label = chosen.get("source")
 
     synced_lines: List[Dict[str, Any]] = []
@@ -201,9 +203,18 @@ def _lyrics_payload(doc: Dict[str, Any]) -> Dict[str, Any]:
             ]
             source_label = sv.get("source")
 
+    # Offer a romanized alternate ONLY when there's a genuine Telugu primary AND a
+    # distinct romanized block. Romanized-only songs already surface their roman
+    # text as `plain`, so a toggle there would just show the same lines twice.
+    has_telugu_primary = bool(text_telugu) or bool(synced_lines)
+    plain_roman = (
+        text_roman if (text_roman and has_telugu_primary and text_roman != text_telugu) else None
+    )
+
     return {
         "synced": synced_lines,
         "plain": plain,
+        "plainRoman": plain_roman,
         "source": source_label,
         "available": bool(plain or synced_lines),
     }
@@ -682,6 +693,122 @@ async def get_stream_details(artist: str, song: str, url: Optional[str] = None) 
     if res is None:
         raise SongNotFound(f"No stream found for {artist} — {song}")
     return res
+
+
+# ── lyrics version picker + crowd feedback ───────────────────────────────────
+# Songs carry MULTIPLE lyric versions (musixmatch, lyricstape, …). The app shows
+# one by default (chosen_source); this lets a listener browse every version and
+# vote for the one that matches best. Votes live in a SEPARATE `lyrics_feedback`
+# collection (keyed by song _id) so a scraper re-run never clobbers them. We only
+# READ them here — promoting a winner to `chosen_source` stays a manual, offline
+# decision (purity #1: a human confirms before the default ever changes).
+_SOURCE_LABELS = {
+    "musixmatch": "Musixmatch",
+    "lyricstape": "LyricsTape",
+    "lrclib": "LRCLIB",
+    "azlyrics": "AZLyrics",
+    "genius": "Genius",
+    "google": "Google",
+}
+
+
+def _source_label(src: Optional[str]) -> str:
+    if not src:
+        return "Unknown"
+    return _SOURCE_LABELS.get(src, src.replace("_", " ").title())
+
+
+def _feedback_col():
+    return scraper_db.get_collection("lyrics_feedback")
+
+
+def _version_entry(v: Dict[str, Any], chosen: Optional[str], votes: Dict[str, int]) -> Dict[str, Any]:
+    """Shape one stored lyric version for the picker (full text + vote count)."""
+    src = v.get("source") or "unknown"
+    text_telugu = (v.get("text_telugu") or "").strip()
+    text_roman = (v.get("text_roman") or "").strip()
+    synced_lines: List[Dict[str, Any]] = []
+    raw_synced = v.get("synced") or []
+    if raw_synced:
+        joined = " ".join(l.get("text", "") for l in raw_synced)
+        if _is_telugu(joined):  # never expose romanized karaoke over Telugu (purity)
+            synced_lines = [
+                {"timeMs": int(l.get("timeMs", 0) or 0), "text": l.get("text", "")}
+                for l in raw_synced
+            ]
+    plain = text_telugu or text_roman or None
+    plain_roman = (
+        text_roman if (text_roman and text_telugu and text_roman != text_telugu) else None
+    )
+    return {
+        "id": src,
+        "source": src,
+        "label": _source_label(src),
+        "hasSynced": bool(synced_lines),
+        "hasTelugu": bool(text_telugu),
+        "hasRoman": bool(text_roman),
+        "synced": synced_lines,
+        "plain": plain,
+        "plainRoman": plain_roman,
+        "votes": int(votes.get(src, 0) or 0),
+        "isChosen": src == chosen,
+    }
+
+
+def _versions_sync(
+    song_id: Optional[str], artist: Optional[str], song: Optional[str], url: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    col = _col()
+    doc = col.find_one({"_id": song_id}) if song_id else None
+    if not doc:
+        doc = col.find_one({"perma_url": url}) if url else _find_doc(col, artist, song, None)
+    if not doc:
+        return None
+    sid = str(doc.get("_id"))
+    versions = doc.get("lyrics_versions") or []
+    chosen = doc.get("chosen_source")
+    votes: Dict[str, int] = {}
+    try:
+        fb = _feedback_col().find_one({"_id": sid})
+        if fb:
+            votes = fb.get("votes", {}) or {}
+    except Exception:
+        votes = {}
+    entries = [
+        _version_entry(v, chosen, votes)
+        for v in versions
+        if (v.get("text_telugu") or v.get("text_roman"))
+    ]
+    return {"songId": sid, "chosen": chosen, "versions": entries}
+
+
+def _feedback_sync(song_id: str, source: str) -> Dict[str, Any]:
+    # Sanitize the source into a safe Mongo field path (dots/`$` would break the
+    # `votes.<source>` key). Sources are simple slugs, so this only guards abuse.
+    safe = re.sub(r"[^a-z0-9_-]+", "", (source or "").lower())
+    if not song_id or not safe:
+        return {"ok": False, "songId": song_id or "", "votes": {}}
+    fcol = _feedback_col()
+    fcol.update_one(
+        {"_id": song_id},
+        {"$inc": {f"votes.{safe}": 1, "total": 1}, "$set": {"updated_ms": int(time.time() * 1000)}},
+        upsert=True,
+    )
+    doc = fcol.find_one({"_id": song_id}) or {}
+    return {"ok": True, "songId": song_id, "votes": doc.get("votes", {}) or {}}
+
+
+async def get_lyrics_versions(
+    song_id: Optional[str] = None,
+    artist: Optional[str] = None,
+    song: Optional[str] = None,
+    url: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    return await asyncio.to_thread(_versions_sync, song_id, artist, song, url)
+
+
+async def record_lyrics_feedback(song_id: str, source: str) -> Dict[str, Any]:
+    return await asyncio.to_thread(_feedback_sync, song_id, source)
 
 
 # ── artist portraits (singer pages show the SINGER, not a movie poster) ───────

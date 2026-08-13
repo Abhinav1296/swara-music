@@ -9,11 +9,16 @@ The backend is now a thin proxy in front of a personal **Lyrica** instance
 LRCLib/MusicBrainz and full-length audio streams from JioSaavn.
 """
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 # Load variables from a local .env file if present (never overrides real env).
 load_dotenv()
+# Also load the scraper's .env — the single shared secrets file (MONGODB_URI,
+# GOOGLE_CLIENT_ID, SESSION_SECRET, …). Explicit path because a bare
+# load_dotenv() won't find a sibling directory's .env.
+load_dotenv(Path(__file__).resolve().parents[2] / "scraper" / ".env")
 
 
 class Settings:
@@ -55,12 +60,24 @@ class Settings:
     # repeated (artist, song) lookups are fast and upstream-friendly.
     SONG_CACHE_TTL: int = int(os.getenv("SONG_CACHE_TTL", str(60 * 60 * 6)))
 
-    # CORS — the Vite dev server origin(s)
+    # CORS — the Vite dev server origin(s). For the Capacitor APK, also allow the
+    # native WebView origin, e.g. CORS_ORIGINS="http://localhost:5173,https://localhost".
     CORS_ORIGINS: list[str] = [
         origin.strip()
         for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
         if origin.strip()
     ]
+
+    # ── Auth (Google Sign-In + our own session) ──────────────────────────────
+    # The Google **Web** OAuth client id. It is used BOTH as the app's
+    # `serverClientId` (so the ID token's audience is this id) AND here to verify
+    # incoming ID tokens. Safe to expose (it's embedded in the app); set via env.
+    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "").strip()
+    # Secret used to SIGN our own session JWTs (HS256). MUST be a strong random
+    # value in production and NEVER committed — override with the env var.
+    SESSION_SECRET: str = os.getenv("SESSION_SECRET", "dev-insecure-change-me")
+    # How long a login session stays valid (seconds). Default 30 days.
+    SESSION_TTL_SECONDS: int = int(os.getenv("SESSION_TTL_SECONDS", str(60 * 60 * 24 * 30)))
 
     @property
     def lyrica_timeout(self) -> tuple[float, float]:

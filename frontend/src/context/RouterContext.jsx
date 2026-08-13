@@ -13,7 +13,16 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
  */
 const RouterContext = createContext(null);
 
-const KNOWN = new Set(["home", "search", "library", "artist", "album", "albums", "playlist"]);
+const KNOWN = new Set([
+  "home",
+  "search",
+  "library",
+  "artist",
+  "album",
+  "albums",
+  "playlist",
+  "profile",
+]);
 
 function urlFor(name, params) {
   if (name === "home") return "/";
@@ -33,7 +42,7 @@ function urlFor(name, params) {
       if (params.artist) parts.push(`artist=${encodeURIComponent(params.artist)}`);
       // year disambiguates same-named films (Maharshi 2000 vs 2019); keep it in
       // the URL so a refresh / deep link lands on the exact album.
-      if (params.year != null && params.year !== "")
+      if (params.year != null && params.year !== "" && Number.isFinite(Number(params.year)))
         parts.push(`year=${encodeURIComponent(params.year)}`);
       // saavnId resolves a live JioSaavn album (new releases) into its tracks.
       if (params.saavnId) parts.push(`saavnId=${encodeURIComponent(params.saavnId)}`);
@@ -59,7 +68,8 @@ function routeFromLocation() {
       if (qs.get("name")) params.name = qs.get("name");
       if (name === "album") {
         if (qs.get("artist")) params.artist = qs.get("artist");
-        if (qs.get("year")) params.year = qs.get("year");
+        if (qs.get("year") && Number.isFinite(Number(qs.get("year"))))
+          params.year = qs.get("year");
         if (qs.get("saavnId")) params.saavnId = qs.get("saavnId");
       }
     }

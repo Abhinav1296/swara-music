@@ -4,7 +4,16 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.schemas import AlbumsResponse, LookupResponse, SearchResponse, SongDetails, StreamResponse
+from app.schemas import (
+    AlbumsResponse,
+    LookupResponse,
+    LyricsFeedbackRequest,
+    LyricsFeedbackResponse,
+    LyricsVersionsResponse,
+    SearchResponse,
+    SongDetails,
+    StreamResponse,
+)
 from app.services.lyrica import (
     LyricaError,
     LyricaRateLimited,
@@ -198,5 +207,42 @@ async def lookup(
         if type == "album":
             return await source.lookup_album(target, artist=artist, year=year, limit=limit)
         return await source.lookup_artist(target, limit=limit)
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc
+
+
+@router.get("/lyrics/versions", response_model=LyricsVersionsResponse)
+async def lyrics_versions(
+    id: str | None = Query(None, description="Song _id (preferred, exact)"),
+    artist: str | None = Query(None, description="Track artist (fallback lookup)"),
+    song: str | None = Query(None, description="Track title (aliased by title/track)"),
+    title: str | None = Query(None, alias="title", description="Alias of `song`"),
+    track: str | None = Query(None, alias="track", description="Alias of `song`"),
+    url: str | None = Query(None, description="JioSaavn perma_url (fallback lookup)"),
+) -> LyricsVersionsResponse:
+    """Every stored lyric version for one song, with running vote tallies."""
+    fn = getattr(source, "get_lyrics_versions", None)
+    if fn is None:  # legacy lyrica source has no multi-version store
+        return LyricsVersionsResponse(songId=None, chosen=None, versions=[])
+    effective_song = song or title or track
+    try:
+        res = await fn(song_id=id, artist=artist, song=effective_song, url=url)
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc
+    if res is None:
+        raise HTTPException(status_code=404, detail="No lyric versions for this track")
+    return res
+
+
+@router.post("/lyrics/feedback", response_model=LyricsFeedbackResponse)
+async def lyrics_feedback(body: LyricsFeedbackRequest) -> LyricsFeedbackResponse:
+    """Record a listener's vote for the lyric version that matches best."""
+    fn = getattr(source, "record_lyrics_feedback", None)
+    if fn is None:
+        raise HTTPException(status_code=503, detail="Feedback not supported by this source")
+    if not body.songId or not body.source:
+        raise HTTPException(status_code=422, detail="songId and source are required")
+    try:
+        return await fn(body.songId, body.source)
     except Exception as exc:
         raise _handle_upstream_exception(exc) from exc

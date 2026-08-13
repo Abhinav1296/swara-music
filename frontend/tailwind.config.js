@@ -4,7 +4,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Apple Music accent (pink/red), used sparingly for emphasis.
+        // Original Apple pink/red accent — used for active states, seek, glow.
         accent: {
           DEFAULT: "#fa233b",
           soft: "#ff375f",

@@ -17,5 +17,12 @@ pycryptodome>=3.23
 curl_cffi>=0.16
 beautifulsoup4>=4.15
 
+# Auth — verify Google ID tokens + sign our own session JWTs
+google-auth>=2.35
+pyjwt>=2.10
+# google-auth's default transport (used to fetch Google's signing certs) needs
+# the `requests` library.
+requests>=2.32
+
 # Dev / testing only (in-memory Mongo)
 mongomock>=4.3

@@ -77,21 +77,51 @@ export function normalizeTrack(t) {
  * `time` is in SECONDS so the existing `resolveActiveLine(lines, progress)`
  * works unchanged.
  */
+function plainToLines(text) {
+  if (!text) return [];
+  return String(text)
+    .split(/\r?\n/)
+    .map((t) => ({ time: -1, text: t }))
+    .filter((l) => l.text.trim());
+}
+
 export function normalizeLyrics(payload) {
   if (!payload || !payload.available) {
-    return { kind: "unavailable", lines: [], plain: null, source: payload?.source ?? null };
+    return { kind: "unavailable", lines: [], plain: null, roman: null, source: payload?.source ?? null };
   }
+  // Romanized alternate (plain, no karaoke timing) — non-null ONLY when the
+  // backend flagged this song as having a distinct Latin-script version. The
+  // player shows a Telugu/Romanized toggle exactly when `roman` is present.
+  const romanLines = plainToLines(payload.plainRoman);
+  const roman = romanLines.length ? romanLines : null;
+
   const synced = (payload.synced || []).map((l) => ({
     time: (l.timeMs ?? 0) / 1000,
     text: l.text || "",
   }));
   if (synced.length) {
-    return { kind: "timed", lines: synced, plain: payload.plain || null, source: payload.source };
+    return { kind: "timed", lines: synced, plain: payload.plain || null, roman, source: payload.source };
   }
   const plain = payload.plain || "";
-  const lines = plain
-    .split(/\r?\n/)
-    .map((text) => ({ time: -1, text }))
-    .filter((l) => l.text.trim());
-  return { kind: "plain", lines, plain, source: payload.source };
+  const lines = plainToLines(plain);
+  return { kind: "plain", lines, plain, roman, source: payload.source };
+}
+
+/**
+ * Normalize one lyric VERSION (from /api/lyrics/versions) into the same shape the
+ * lyrics panel renders, so switching versions reuses the existing UI unchanged.
+ */
+export function normalizeVersion(v) {
+  if (!v) return null;
+  const romanLines = plainToLines(v.plainRoman);
+  const roman = romanLines.length ? romanLines : null;
+  const synced = (v.synced || []).map((l) => ({
+    time: (l.timeMs ?? 0) / 1000,
+    text: l.text || "",
+  }));
+  if (synced.length) {
+    return { kind: "timed", lines: synced, plain: v.plain || null, roman, source: v.source };
+  }
+  const plain = v.plain || "";
+  return { kind: "plain", lines: plainToLines(plain), plain, roman, source: v.source };
 }

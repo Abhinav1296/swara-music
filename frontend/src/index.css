@@ -15,10 +15,10 @@ body,
 body {
   margin: 0;
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  /* Dark, luxurious base with a faint accent glow. */
+  /* Near-black base with a faint pink glow (the original theme). */
   background:
-    radial-gradient(1200px 600px at 80% -10%, rgba(250, 35, 59, 0.12), transparent 60%),
-    radial-gradient(900px 500px at 0% 10%, rgba(120, 40, 200, 0.1), transparent 55%),
+    radial-gradient(1200px 600px at 80% -10%, rgba(250, 35, 59, 0.14), transparent 60%),
+    radial-gradient(900px 500px at 0% 10%, rgba(250, 35, 59, 0.06), transparent 55%),
     #08080c;
   background-attachment: fixed;
   color: #f5f5f7;
@@ -143,6 +143,36 @@ input[type="range"]:disabled::-moz-range-thumb {
   }
   .glass-strong {
     @apply border border-white/10 bg-white/10 backdrop-blur-2xl;
+  }
+
+  /* Clean glossy glass button (play/pause) — translucent, a thin top rim of
+     light for the gloss, subtle inner shade for depth. No white blob inside;
+     it just picks up the background like the iOS reference. */
+  .btn-glossy {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow:
+      inset 0 1px 1px rgba(255, 255, 255, 0.35),
+      inset 0 -6px 12px rgba(0, 0, 0, 0.22),
+      0 8px 22px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    transition: box-shadow 160ms ease, transform 160ms ease, filter 160ms ease;
+  }
+  .btn-glossy:hover {
+    filter: brightness(1.12);
+  }
+
+  /* Glossy glass — secondary circular controls / chips. Subtle top sheen over
+     the frosted glass so buttons feel consistent with the primary orb. */
+  .glass-glossy {
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04)),
+      rgba(255, 255, 255, 0.03);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25), 0 4px 14px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(16px);
   }
 }
 

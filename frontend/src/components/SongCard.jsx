@@ -68,7 +68,7 @@ export default function SongCard({ song, list }) {
             play(song, context);
           }}
           aria-label={isPlayingThis ? "Pause preview" : "Play preview"}
-          className="absolute bottom-3 right-3 flex h-12 w-12 translate-y-3 items-center justify-center rounded-full bg-accent text-white opacity-0 shadow-glow transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 hover:scale-105"
+          className="absolute bottom-3 right-3 flex h-12 w-12 translate-y-3 items-center justify-center btn-glossy rounded-full text-white opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 hover:scale-105"
         >
           {isPlayingThis ? (
             <Pause size={20} fill="white" />

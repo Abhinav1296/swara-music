@@ -35,7 +35,7 @@ export default function LibraryView() {
       {/* Liked Songs hero */}
       <div className="glass relative mb-8 flex items-center gap-5 overflow-hidden rounded-3xl p-5 md:gap-7 md:p-8">
         <div className="pointer-events-none absolute -right-16 -top-16 h-60 w-60 rounded-full bg-accent/30 blur-3xl" />
-        <div className="relative flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-accent to-fuchsia-600 shadow-glow md:h-36 md:w-36">
+        <div className="relative flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-white/15 to-white/5 shadow-glow md:h-36 md:w-36">
           <Heart size={44} className="text-white" fill="white" />
         </div>
         <div className="relative min-w-0">
@@ -48,7 +48,7 @@ export default function LibraryView() {
             type="button"
             disabled={likedSongs.length === 0}
             onClick={() => play(likedSongs[0], likedSongs)}
-            className="mt-4 inline-flex items-center gap-2 rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30"
+            className="mt-4 inline-flex items-center gap-2 btn-glossy rounded-full px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30"
           >
             <Play size={18} fill="white" />
             {likedPlaying ? "Pause" : "Play"}
@@ -108,7 +108,7 @@ export default function LibraryView() {
               onClick={() => navigate("playlist", { id: p.id, name: p.name })}
               className="group flex flex-col gap-3 rounded-3xl p-3 text-left glass transition-colors hover:bg-white/10"
             >
-              <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-accent to-fuchsia-600">
+              <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-white/15 to-white/5">
                 <Music2 size={40} className="text-white/90" />
               </div>
               <div className="min-w-0 px-1 pb-1">

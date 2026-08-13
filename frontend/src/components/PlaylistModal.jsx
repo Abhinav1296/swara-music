@@ -64,14 +64,19 @@ export default function PlaylistModal({
             className="fixed inset-0 z-[90] bg-black/50 backdrop-blur-sm"
             onClick={onClose}
           />
+          <div
+            className="fixed inset-0 z-[91] flex items-center justify-center p-4"
+            onClick={onClose}
+          >
           <motion.div
             role="dialog"
             aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
             initial={{ opacity: 0, scale: 0.95, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={{ type: "spring", stiffness: 320, damping: 30 }}
-            className="glass-strong fixed left-1/2 top-1/2 z-[91] w-[90vw] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-white/10 p-6 shadow-glass"
+            className="glass-strong w-full max-w-sm rounded-3xl border border-white/10 p-6 shadow-glass"
           >
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold text-white">{title}</h2>
@@ -106,13 +111,14 @@ export default function PlaylistModal({
                 <button
                   type="submit"
                   disabled={!name.trim()}
-                  className="rounded-full bg-accent px-5 py-2 text-sm font-semibold text-white shadow-glow transition hover:opacity-90 disabled:opacity-30"
+                  className="btn-glossy rounded-full px-5 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-30"
                 >
                   {submitLabel}
                 </button>
               </div>
             </form>
           </motion.div>
+          </div>
         </>
       )}
     </AnimatePresence>,

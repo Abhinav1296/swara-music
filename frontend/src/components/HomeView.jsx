@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import { Pause, Play } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
 import { useRouter } from "../context/RouterContext";
@@ -16,6 +17,19 @@ const MOOD_SECTIONS = [
   { title: "Melodies", query: "telugu melody songs" },
 ];
 
+// Quick-tap vibe chips under the hero — a fast way into a mood/search without
+// typing. Each just navigates to the search view with its query.
+const MOOD_CHIPS = [
+  { label: "Romantic", query: "telugu romantic songs" },
+  { label: "Mass & Energy", query: "telugu mass songs" },
+  { label: "Melodies", query: "telugu melody songs" },
+  { label: "Devotional", query: "telugu devotional songs" },
+  { label: "90s Classics", query: "telugu 90s hits" },
+  { label: "Folk", query: "telugu folk songs" },
+  { label: "Sad", query: "telugu sad songs" },
+  { label: "Party", query: "telugu party songs" },
+];
+
 // Preferred order of artists to surface when derivable from shelves.
 const PREFERRED_ARTISTS = [
   "Sid Sriram",
@@ -27,10 +41,22 @@ const PREFERRED_ARTISTS = [
   "S. P. Balasubrahmanyam",
 ];
 
+const HERO_ROTATE_MS = 6500;
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 5) return "Late night vibes";
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  if (h < 21) return "Good evening";
+  return "Winding down";
+}
+
 /**
- * Home: gradient hero (featured track) + horizontal shelves.
- * NOTE: We no longer fanout /api/search for each artist. Popular Artists
- * are derived from the tracks already fetched by shelves.
+ * Home: time-aware greeting + a cinematic auto-rotating hero (top trending,
+ * ambient blurred-art backdrop) + quick mood chips + horizontal shelves.
+ * Popular Artists are derived from the tracks already fetched by the shelves
+ * (no extra fanout).
  */
 export default function HomeView() {
   const { current, isPlaying, play } = usePlayer();
@@ -106,44 +132,127 @@ export default function HomeView() {
     return arr.slice(0, 12);
   }, [trending, shelfSongs]);
 
-  const featured = trending[0];
+  // ── Rotating hero ──────────────────────────────────────────────────────────
+  const heroItems = useMemo(() => trending.slice(0, 5), [trending]);
+  const [heroIdx, setHeroIdx] = useState(0);
+  const [heroPaused, setHeroPaused] = useState(false);
+
+  // Keep the index valid as the list loads/changes.
+  useEffect(() => {
+    if (heroIdx >= heroItems.length) setHeroIdx(0);
+  }, [heroItems.length, heroIdx]);
+
+  // Auto-advance (paused on hover / when only one item).
+  useEffect(() => {
+    if (heroPaused || heroItems.length <= 1) return undefined;
+    const t = setInterval(
+      () => setHeroIdx((i) => (i + 1) % heroItems.length),
+      HERO_ROTATE_MS
+    );
+    return () => clearInterval(t);
+  }, [heroPaused, heroItems.length]);
+
+  const featured = heroItems[heroIdx];
   const featuredPlaying = featured && current?.id === featured.id && isPlaying;
 
   return (
     <div className="pt-2">
-      {/* Hero */}
+      {/* Greeting */}
+      <div className="mb-5 px-1">
+        <p className="text-sm text-white/45">{greeting()}</p>
+        <h1 className="mt-0.5 text-2xl font-extrabold tracking-tight text-white md:text-3xl">
+          Discover Telugu music
+        </h1>
+      </div>
+
+      {/* Cinematic rotating hero */}
       {featured ? (
-        <div className="glass relative mb-10 overflow-hidden rounded-3xl p-6 md:p-8">
-          <div className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-accent/30 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-28 left-12 h-72 w-72 rounded-full bg-fuchsia-600/20 blur-3xl" />
-          <div className="relative flex flex-col items-center gap-6 md:flex-row md:gap-8">
-            <img
+        <div
+          className="glass relative mb-6 overflow-hidden rounded-3xl"
+          onMouseEnter={() => setHeroPaused(true)}
+          onMouseLeave={() => setHeroPaused(false)}
+        >
+          {/* Ambient blurred-art backdrop (crossfades as the hero rotates) */}
+          <div className="absolute inset-0 -z-10 overflow-hidden bg-black">
+            <AnimatePresence>
+              <motion.img
+                key={featured.id}
+                src={featured.artworkUrl600 || featured.artworkUrl100}
+                alt=""
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 0.55 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.9 }}
+                className="absolute inset-0 h-full w-full scale-125 object-cover blur-3xl saturate-150"
+              />
+            </AnimatePresence>
+            <div className="absolute inset-0 bg-gradient-to-tr from-black/75 via-black/50 to-black/25" />
+          </div>
+
+          <div className="relative flex flex-col items-center gap-6 p-6 md:flex-row md:gap-8 md:p-9">
+            <motion.img
+              key={`${featured.id}-cover`}
+              initial={{ scale: 0.94, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: "spring", stiffness: 200, damping: 24 }}
               src={featured.artworkUrl600 || featured.artworkUrl100}
               alt={featured.trackName}
-              className="h-40 w-40 shrink-0 rounded-2xl object-cover shadow-2xl md:h-52 md:w-52"
+              className="h-44 w-44 shrink-0 rounded-2xl object-cover shadow-2xl ring-1 ring-white/15 md:h-56 md:w-56"
             />
-            <div className="min-w-0 text-center md:text-left">
-              <p className="text-xs font-semibold uppercase tracking-widest text-white/50">
-                Featured
+            <div className="min-w-0 flex-1 text-center md:text-left">
+              <p className="text-xs font-semibold uppercase tracking-widest text-accent">
+                Featured today
               </p>
-              <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-white md:text-5xl">
+              <h2 className="mt-1 truncate text-3xl font-extrabold tracking-tight text-white md:text-5xl">
                 {featured.trackName}
-              </h1>
-              <p className="mt-2 text-white/60">{featured.artistName}</p>
-              <button
-                type="button"
-                onClick={() => play(featured, trending)}
-                className="mt-5 inline-flex items-center gap-2 rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition hover:opacity-90"
-              >
-                {featuredPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" />}
-                {featuredPlaying ? "Pause" : "Play"}
-              </button>
+              </h2>
+              <p className="mt-2 truncate text-white/70">{featured.artistName}</p>
+              <div className="mt-5 flex items-center justify-center gap-4 md:justify-start">
+                <button
+                  type="button"
+                  onClick={() => play(featured, heroItems)}
+                  className="btn-glossy inline-flex items-center gap-2 rounded-full px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90"
+                >
+                  {featuredPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" />}
+                  {featuredPlaying ? "Pause" : "Play"}
+                </button>
+                {/* Rotation dots */}
+                {heroItems.length > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    {heroItems.map((_, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setHeroIdx(i)}
+                        aria-label={`Featured ${i + 1}`}
+                        className={`h-1.5 rounded-full transition-all ${
+                          i === heroIdx ? "w-6 bg-accent" : "w-1.5 bg-white/30 hover:bg-white/55"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
       ) : (
-        <div className="glass mb-10 h-56 animate-pulse rounded-3xl" />
+        <div className="glass mb-6 h-56 animate-pulse rounded-3xl" />
       )}
+
+      {/* Quick mood chips */}
+      <div className="no-scrollbar mb-9 flex gap-2.5 overflow-x-auto pb-1">
+        {MOOD_CHIPS.map((c) => (
+          <button
+            key={c.query}
+            type="button"
+            onClick={() => navigate("search", { q: c.query })}
+            className="glass-glossy shrink-0 rounded-full px-4 py-2 text-sm font-semibold text-white/75 transition hover:text-white"
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
 
       {/* Trending (reuses the fetched list) */}
       <Section

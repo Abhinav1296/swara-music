@@ -91,7 +91,7 @@ export default function NowPlayingBar() {
             <button
               type="button"
               onClick={openFullscreen}
-              className="min-w-0 text-left"
+              className="min-w-0 flex-1 text-left"
               aria-label="Open full-screen player"
             >
               <p className="truncate text-sm font-semibold text-white" title={current.trackName}>
@@ -129,14 +129,14 @@ export default function NowPlayingBar() {
       </div>
 
       {/* Transport + progress */}
-      <div className="flex flex-[2] flex-col items-center gap-1.5">
+      <div className="flex flex-none flex-col items-center gap-1.5 md:flex-[2]">
         <div className="flex items-center gap-4">
           <button
             type="button"
             onClick={prev}
             disabled={!current}
             aria-label="Previous"
-            className="hidden text-white/70 transition hover:text-white disabled:opacity-30 sm:block"
+            className="text-white/70 transition hover:text-white disabled:opacity-30"
           >
             <SkipBack size={18} fill="currentColor" />
           </button>
@@ -145,12 +145,12 @@ export default function NowPlayingBar() {
             onClick={toggle}
             disabled={!current}
             aria-label={isPlaying ? "Pause" : "Play"}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-black transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-30"
+            className="btn-glossy flex h-10 w-10 items-center justify-center rounded-full transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-30"
           >
             {isPlaying ? (
-              <Pause size={18} fill="black" />
+              <Pause size={18} fill="currentColor" />
             ) : (
-              <Play size={18} fill="black" className="ml-0.5" />
+              <Play size={18} fill="currentColor" className="ml-0.5" />
             )}
           </button>
           <button
@@ -158,7 +158,7 @@ export default function NowPlayingBar() {
             onClick={next}
             disabled={!current}
             aria-label="Next"
-            className="hidden text-white/70 transition hover:text-white disabled:opacity-30 sm:block"
+            className="text-white/70 transition hover:text-white disabled:opacity-30"
           >
             <SkipForward size={18} fill="currentColor" />
           </button>

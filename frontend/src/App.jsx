@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence } from "framer-motion";
+import { AuthProvider } from "./context/AuthContext";
 import { LibraryProvider } from "./context/LibraryContext";
 import { PlaylistProvider } from "./context/PlaylistContext";
 import { RouterProvider, useRouter } from "./context/RouterContext";
@@ -17,6 +18,7 @@ import PlaylistView from "./components/PlaylistView";
 import ArtistView from "./components/ArtistView";
 import AlbumView from "./components/AlbumView";
 import AlbumsView from "./components/AlbumsView";
+import ProfileView from "./components/ProfileView";
 import SplashScreen from "./components/SplashScreen";
 
 const SPLASH_KEY = "swara:splash_shown";
@@ -52,6 +54,9 @@ function Shell() {
       break;
     case "albums":
       content = <AlbumsView />;
+      break;
+    case "profile":
+      content = <ProfileView />;
       break;
     default:
       content = <HomeView />;
@@ -100,17 +105,19 @@ export default function App() {
   }, []);
 
   return (
-    <LibraryProvider>
-      <PlaylistProvider>
-        <RouterProvider>
-          <PlayerProvider>
-            <Shell />
-            <AnimatePresence>
-              {showSplash && <SplashScreen key="splash" onComplete={handleSplashDone} />}
-            </AnimatePresence>
-          </PlayerProvider>
-        </RouterProvider>
-      </PlaylistProvider>
-    </LibraryProvider>
+    <AuthProvider>
+      <LibraryProvider>
+        <PlaylistProvider>
+          <RouterProvider>
+            <PlayerProvider>
+              <Shell />
+              <AnimatePresence>
+                {showSplash && <SplashScreen key="splash" onComplete={handleSplashDone} />}
+              </AnimatePresence>
+            </PlayerProvider>
+          </RouterProvider>
+        </PlaylistProvider>
+      </LibraryProvider>
+    </AuthProvider>
   );
 }

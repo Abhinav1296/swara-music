@@ -59,7 +59,7 @@ export default function DetailView({ name, kind, artist, year, saavnId }) {
       {/* Header */}
       <div className="relative mb-8 overflow-hidden rounded-3xl">
         <div className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-accent/25 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-28 left-12 h-72 w-72 rounded-full bg-fuchsia-600/15 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-28 left-12 h-72 w-72 rounded-full bg-accent/12 blur-3xl" />
         <div className="glass relative flex flex-col items-center gap-6 p-6 md:flex-row md:gap-8 md:p-8">
           <img
             src={data?.artworkUrl600 || ""}
@@ -79,7 +79,7 @@ export default function DetailView({ name, kind, artist, year, saavnId }) {
                 type="button"
                 disabled={tracks.length === 0}
                 onClick={() => play(tracks[0], tracks)}
-                className="inline-flex items-center gap-2 rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition hover:opacity-90 disabled:opacity-30"
+                className="inline-flex items-center gap-2 btn-glossy rounded-full px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-30"
               >
                 {listPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" />}
                 {listPlaying ? "Pause" : "Play"}

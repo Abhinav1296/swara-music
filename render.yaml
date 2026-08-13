@@ -1,0 +1,37 @@
+# Render blueprint — deploys the Swara FastAPI backend (backend only).
+#
+# In Render:  New +  →  Blueprint  →  connect this GitHub repo  →  it reads this
+# file. You'll be prompted to enter the two secret env vars (MONGODB_URI and
+# SESSION_SECRET) — they are NOT stored in this file / git.
+#
+# The frontend is NOT deployed here; it's bundled into the APK and just calls
+# this service's URL.
+services:
+  - type: web
+    name: swara-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: SWARA_SOURCE
+        value: mongo
+      # Allow the Capacitor APK (https://localhost / capacitor://localhost) and
+      # local web dev. Add your production web origin here later if you host one.
+      - key: CORS_ORIGINS
+        value: "https://localhost,capacitor://localhost,http://localhost:5173,http://127.0.0.1:5173"
+      # Public Google Web client id (safe to commit).
+      - key: GOOGLE_CLIENT_ID
+        value: "398262049439-05f556d8doi820o3d3c365cmsi0dtsfl.apps.googleusercontent.com"
+      # Secrets — enter these in the Render dashboard when prompted (sync:false
+      # keeps them OUT of git). MONGODB_URI = your Atlas connection string;
+      # SESSION_SECRET = the value in scraper/.env.
+      - key: MONGODB_URI
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
