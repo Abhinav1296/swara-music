@@ -8,7 +8,7 @@ import {
 } from "react";
 import { loadJSON, saveJSON, STORAGE_KEYS } from "../utils/storage";
 import { useLibrary } from "./LibraryContext";
-import { getSongDetails } from "../api/client";
+import { getRelated, getSongDetails } from "../api/client";
 import { normalizeLyrics, normalizeTrack } from "../utils/trackAdapter";
 
 /**
@@ -353,6 +353,67 @@ export function PlayerProvider({ children }) {
       }
     }, d);
   }, [prefetchTrack]);
+
+  // --- Autoplay-continuation ("radio") -----------------------------------
+  // A short list (e.g. a 4-5 song "Featured Today") used to dead-end: once
+  // `upcoming` drained, goNext hit setIsPlaying(false) and playback just
+  // stopped. Now, when the queue runs low AND the user hasn't asked to loop
+  // (repeat "off"), we fetch songs related to the current track and append
+  // them — an endless catalog "radio" so playback never dead-stops.
+  //
+  // Guards: at most ONE fetch per current song (lastExtendSeedRef), no
+  // concurrent fetches (extendInflightRef), and every result is de-duped
+  // against the whole session (current + upcoming + played) so we never queue
+  // a song already heard or waiting. Best-effort — a failure just lets the
+  // queue end as before.
+  const LOW_WATER = 2; // top up once the pool is down to ≤2 songs of runway
+  const RADIO_BATCH = 20;
+  const extendInflightRef = useRef(false);
+  const lastExtendSeedRef = useRef(null);
+
+  const extendQueueIfLow = useCallback(async () => {
+    const st = transportRef.current;
+    const { current, upcoming, played, shuffle, repeat } = st;
+    if (!current) return;
+    if (repeat !== "off") return; // "all"/"one" loop by design — no radio
+    // The pool goNext will draw from: shuffle can revisit `played` too.
+    const poolCount = shuffle ? played.length + upcoming.length : upcoming.length;
+    if (poolCount > LOW_WATER) return;
+    if (extendInflightRef.current) return;
+    if (lastExtendSeedRef.current === current.id) return; // one attempt / song
+    lastExtendSeedRef.current = current.id;
+    extendInflightRef.current = true;
+    try {
+      const { results } = await getRelated({
+        id: current.id,
+        artist: current.artistName,
+        movie: current.collectionName,
+        url: current.jiosaavnUrl,
+        limit: RADIO_BATCH,
+      });
+      // De-dupe against everything already in the session (by id AND by
+      // artist|title key) so the radio never repeats what's already queued.
+      const live = transportRef.current;
+      const known = [live.current, ...live.upcoming, ...live.played].filter(Boolean);
+      const seenIds = new Set(known.map((t) => t.id));
+      const seenKeys = new Set(known.map(trackKey));
+      const fresh = (results || []).filter(
+        (t) => t && !seenIds.has(t.id) && !seenKeys.has(trackKey(t))
+      );
+      if (fresh.length) setUpcoming((u) => [...u, ...fresh]);
+    } catch {
+      // Radio is best-effort; on failure the queue simply ends as before.
+    } finally {
+      extendInflightRef.current = false;
+    }
+  }, []);
+
+  // Watch the queue and top it up just before it runs dry. Fires on song
+  // change and whenever the pool shrinks; the guards above keep it to one
+  // effective fetch per low-water crossing.
+  useEffect(() => {
+    extendQueueIfLow();
+  }, [current, upcoming.length, played.length, shuffle, repeat, extendQueueIfLow]);
 
   // Restore queue + current track from a previous session (best effort).
   // We load stream + lyrics for the restored track but do NOT autoplay

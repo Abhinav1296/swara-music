@@ -47,9 +47,13 @@ def _handle_upstream_exception(exc: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail="Unexpected error")
 
 
-@router.get("/health")
+@router.api_route("/health", methods=["GET", "HEAD"])
 async def health() -> dict:
-    """Liveness probe — useful for containers and quick checks."""
+    """Liveness probe — useful for containers and uptime pingers.
+
+    Answers HEAD as well as GET: UptimeRobot (and many monitors) send HEAD by
+    default, and a GET-only route replies 405, which reads as a false "down".
+    """
     return {"status": "ok", "service": "swara-music", "source": "lyrica"}
 
 
@@ -75,6 +79,29 @@ async def trending(
         if q:
             return await source.search_jiosaavn_tracks(q, limit)
         return await source.get_trending(limit)
+    except Exception as exc:
+        raise _handle_upstream_exception(exc) from exc
+
+
+@router.get("/related", response_model=SearchResponse)
+async def related(
+    id: str | None = Query(None, description="Seed song id (excluded from results)"),
+    artist: str | None = Query(None, description="Seed singer(s), comma-separated"),
+    movie: str | None = Query(None, description="Seed movie/album name"),
+    url: str | None = Query(None, description="Seed JioSaavn perma_url (excluded)"),
+    limit: int = Query(20, ge=1, le=50, description="How many to return (1–50)"),
+) -> SearchResponse:
+    """Radio / autoplay-continuation for a seed song — same soundtrack + singer(s).
+
+    Pass whatever the player already knows (`artist`+`movie` are ideal; `id`/`url`
+    alone also work). Returns catalog songs shaped exactly like `/search`, so the
+    queue can append them and keep playing when it runs low.
+    """
+    get_related = getattr(source, "get_related", None)
+    if get_related is None:  # legacy lyrica source has no radio
+        return SearchResponse(query="related", count=0, results=[])
+    try:
+        return await get_related(song_id=id, artist=artist, movie=movie, url=url, limit=limit)
     except Exception as exc:
         raise _handle_upstream_exception(exc) from exc
 

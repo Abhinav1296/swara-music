@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import re
 import sys
 import time
@@ -279,6 +280,97 @@ def _trending_sync(limit: int) -> List[Dict[str, Any]]:
             if len(docs) >= limit:
                 break
     return [_to_song(d) for d in docs[:limit]]
+
+
+def _related_sync(
+    seed_id: Optional[str],
+    artist: Optional[str],
+    movie: Optional[str],
+    url: Optional[str],
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """Build an "up next" radio for a seed song from our OWN catalog:
+      1. the rest of its soundtrack (same movie) — the strongest signal,
+      2. more songs by the same singer(s), lightly shuffled for freshness,
+      3. a popular lyric-having fallback so autoplay NEVER dead-ends.
+
+    Content-based only (no user history, no external calls). If the caller passed
+    just an ``id``/``url`` we resolve the seed's movie+singers from the DB first.
+    Only streamable songs (with an ``encrypted_media_url``) are returned, so every
+    result is immediately playable by the same lazy-resolve path as search.
+    """
+    col = _col()
+
+    # Fill in the seed's movie/singers if the caller only gave us an id or url.
+    if (not movie or not artist) and (seed_id or url):
+        seed = None
+        if seed_id:
+            seed = col.find_one({"_id": seed_id})
+        if seed is None and url:
+            seed = col.find_one({"perma_url": url})
+        if seed:
+            movie = movie or seed.get("movie")
+            artist = artist or seed.get("singers")
+            url = url or seed.get("perma_url")
+
+    seen_ids = {seed_id} if seed_id else set()
+    seen_perma = {url} if url else set()
+    picked: List[Dict[str, Any]] = []
+
+    def _take(doc: Dict[str, Any]) -> None:
+        _id = doc.get("_id")
+        perma = doc.get("perma_url")
+        if (_id is not None and _id in seen_ids) or (perma and perma in seen_perma):
+            return
+        if not doc.get("encrypted_media_url"):  # not streamable → skip
+            return
+        if _id is not None:
+            seen_ids.add(_id)
+        if perma:
+            seen_perma.add(perma)
+        picked.append(doc)
+
+    # 1) Rest of the soundtrack (same movie, resolved via the canonical album key
+    #    so variant spellings collapse to one film).
+    if movie:
+        raws = _album_index(col)["key_to_raws"].get(canonical_movie_key(movie))
+        mq = (
+            {"movie": {"$in": raws}}
+            if raws
+            else {"movie": re.compile(f"^{re.escape(movie.strip())}$", re.I)}
+        )
+        for d in col.find(mq).limit(limit * 2):
+            _take(d)
+
+    # 2) More by the same singer(s). A singer legitimately appears as a substring
+    #    inside a multi-artist "A, B, C" credit, so substring matching is correct.
+    if artist:
+        pool: List[Dict[str, Any]] = []
+        for singer in [s.strip() for s in re.split(r"[,&/]", artist) if s.strip()][:3]:
+            rx = re.compile(re.escape(singer), re.I)
+            pool.extend(col.find({"singers": rx}, limit=limit * 2))
+        random.shuffle(pool)
+        for d in pool:
+            if len(picked) >= limit:
+                break
+            _take(d)
+
+    # 3) Fallback so autoplay never stops: recent songs that already have lyrics.
+    if len(picked) < limit:
+        extra = list(
+            col.find(
+                {"lyrics_missing": False, "encrypted_media_url": {"$nin": [None, ""]}}
+            )
+            .sort("year", -1)
+            .limit(limit * 4)
+        )
+        random.shuffle(extra)
+        for d in extra:
+            if len(picked) >= limit:
+                break
+            _take(d)
+
+    return [_to_song(d) for d in picked[:limit]]
 
 
 # ── album index (canonical movie key + browse list, cached in-memory) ─────────
@@ -603,6 +695,24 @@ async def get_trending(limit: Optional[int] = None) -> Dict[str, Any]:
         return {"query": "trending", "count": len(db), "results": db, "source": SOURCE}
     out = songs[:limit]
     return {"query": "trending", "count": len(out), "results": out, "source": SOURCE}
+
+
+async def get_related(
+    song_id: Optional[str] = None,
+    artist: Optional[str] = None,
+    movie: Optional[str] = None,
+    url: Optional[str] = None,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Radio / "up next" for a seed song — same soundtrack + same singer(s), drawn
+    from our own catalog. Powers autoplay-continuation so the queue never runs dry.
+
+    Lyrics purity: results are real catalog docs, so `lyricsAvailable` reflects the
+    vetted store — we never fabricate coverage to pad the radio.
+    """
+    limit = _clamp(limit)
+    results = await asyncio.to_thread(_related_sync, song_id, artist, movie, url, limit)
+    return {"query": "related", "count": len(results), "results": results, "source": SOURCE}
 
 
 async def get_albums(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any]:

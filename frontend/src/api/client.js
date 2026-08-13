@@ -141,6 +141,27 @@ export function getSongDetails({ artist, song, url, signal } = {}) {
 }
 
 /**
+ * Radio / autoplay-continuation for a seed song — same soundtrack + singer(s),
+ * drawn from our own catalog. Returns { query, count, results } with results
+ * normalized to the UI shape, so they can be appended straight into the player
+ * queue. NOT cached (each call is meant to vary). Best-effort: callers treat a
+ * rejection as "no radio" and simply let the queue end.
+ *
+ * @param {{ id?:string, artist?:string, movie?:string, url?:string, limit?:number, signal?:AbortSignal }} opts
+ */
+export function getRelated({ id, artist, movie, url, limit = 20, signal } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (id) params.set("id", id);
+  if (artist) params.set("artist", artist);
+  if (movie) params.set("movie", movie);
+  if (url) params.set("url", url);
+  return getJson(`/related?${params.toString()}`, { signal }).then((d) => ({
+    ...d,
+    results: (d.results || []).map(normalizeTrack),
+  }));
+}
+
+/**
  * Fast stream-only resolution for immediate playback start.
  * Returns { status, stream_url, artist, title, album, artwork, durationMs, source }
  *
