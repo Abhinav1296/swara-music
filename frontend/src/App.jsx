@@ -66,8 +66,19 @@ function Shell() {
     <div className="flex h-full w-screen overflow-hidden text-white">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar onSearch={handleSearch} />
-        <main className="flex-1 overflow-y-auto px-4 pb-[calc(11rem_+_env(safe-area-inset-bottom))] pt-2 md:px-6 md:pb-40">{content}</main>
+        {/* Global search lives only on the Search tab now. On every other tab
+            the bar is gone, so give the content the top safe-area inset the bar
+            used to provide (keeps it clear of the status bar / notch). */}
+        {route.name === "search" && <TopBar onSearch={handleSearch} />}
+        <main
+          className={`flex-1 overflow-y-auto px-4 pb-[calc(11rem_+_env(safe-area-inset-bottom))] md:px-6 md:pb-40 ${
+            route.name === "search"
+              ? "pt-2"
+              : "pt-[calc(0.5rem_+_env(safe-area-inset-top))]"
+          }`}
+        >
+          {content}
+        </main>
       </div>
       <NowPlayingBar />
       <FullScreenPlayer />

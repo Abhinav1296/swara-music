@@ -8,8 +8,10 @@ import {
   Pause,
   Pencil,
   Play,
+  Search,
   Shuffle,
   Trash2,
+  X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { usePlayer } from "../context/PlayerContext";
@@ -35,6 +37,7 @@ export default function PlaylistView() {
   const [coords, setCoords] = useState({ top: 0, right: 0, above: false });
   const [renameOpen, setRenameOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [query, setQuery] = useState("");
   const kebabRef = useRef(null);
 
   // Keep the resolved name in sync (deep links may supply a name param).
@@ -76,6 +79,14 @@ export default function PlaylistView() {
   }
 
   const songs = playlist.songs || [];
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? songs.filter(
+        (s) =>
+          (s.trackName || "").toLowerCase().includes(q) ||
+          (s.artistName || "").toLowerCase().includes(q)
+      )
+    : songs;
   const listPlaying =
     songs.length > 0 && current && songs.some((t) => t.id === current.id) && isPlaying;
 
@@ -184,11 +195,44 @@ export default function PlaylistView() {
           </p>
         </div>
       ) : (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pb-2">
-          {songs.map((song, i) => (
-            <TrackRow key={song.id} song={song} index={i} list={songs} />
-          ))}
-        </motion.div>
+        <>
+          {/* Search within this playlist (client-side filter of its songs). */}
+          <div className="relative mb-4 max-w-md">
+            <Search
+              size={16}
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/40"
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search in this playlist…"
+              aria-label="Search in this playlist"
+              className="w-full rounded-full bg-white/10 py-2 pl-10 pr-9 text-sm text-white outline-none ring-1 ring-white/10 transition placeholder:text-white/40 focus:bg-white/15 focus:ring-white/25"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label="Clear search"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 transition hover:text-white"
+              >
+                <X size={15} />
+              </button>
+            )}
+          </div>
+
+          {filtered.length === 0 ? (
+            <div className="glass rounded-2xl py-12 text-center">
+              <p className="text-sm text-white/60">No songs match “{query}”.</p>
+            </div>
+          ) : (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pb-2">
+              {filtered.map((song, i) => (
+                <TrackRow key={song.id} song={song} index={i} list={filtered} />
+              ))}
+            </motion.div>
+          )}
+        </>
       )}
 
       {/* Kebab dropdown (portal) */}

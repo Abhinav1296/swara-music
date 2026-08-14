@@ -27,6 +27,7 @@ import { resolveActiveLine } from "../lyrics/lyrics";
 import SyncedLyrics from "./SyncedLyrics";
 import TrackMenu from "./TrackMenu";
 import LyricVersions from "./LyricVersions";
+import { pushBackHandler } from "../utils/backStack";
 
 /**
  * Immersive full-screen "Now Playing" view. Opens from the mini bar with a
@@ -99,6 +100,26 @@ export default function FullScreenPlayer() {
     setOverrideLabel(null);
     setVersionsOpen(false);
   }, [current?.id]);
+
+  // Android BACK: peel inner overlays before the player closes. The versions
+  // picker (topmost) closes first, then the mobile lyrics/up-next sheet — so on
+  // a phone, BACK from the lyrics sheet reveals the player instead of exiting
+  // the whole "Now Playing" view. No-op on web (nothing runs the stack there).
+  useEffect(() => {
+    if (!fullscreen || !versionsOpen) return undefined;
+    return pushBackHandler(() => {
+      setVersionsOpen(false);
+      return true;
+    });
+  }, [fullscreen, versionsOpen]);
+
+  useEffect(() => {
+    if (!fullscreen || rightPanel === "none") return undefined;
+    return pushBackHandler(() => {
+      setRightPanel("none");
+      return true;
+    });
+  }, [fullscreen, rightPanel]);
 
   // What the lyrics panel actually shows: a picked version if any, else default.
   const shownLyrics = overrideLyrics || lyrics;

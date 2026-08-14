@@ -32,4 +32,13 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Media notification / lock-screen controls (@capgo/capacitor-media-session).
+         The plugin runs a "mediaPlayback" foreground service; Android 14+ requires
+         the media-playback foreground-service permission for that service type
+         (without it, starting the service throws SecurityException and crashes the
+         app), and Android 13+ requires POST_NOTIFICATIONS for the notification to
+         actually show. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

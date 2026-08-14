@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
 import { usePlayer } from "../context/PlayerContext";
+import { runBackHandlers } from "../utils/backStack";
 
 /**
  * Android hardware / gesture BACK handling for the native shell.
@@ -34,6 +35,9 @@ export function useAndroidBackButton() {
 
     let handle;
     CapacitorApp.addListener("backButton", ({ canGoBack }) => {
+      // Innermost overlays (lyrics/up-next sheet, versions picker) get first
+      // dibs — they close before the player itself does.
+      if (runBackHandlers()) return;
       const s = stateRef.current;
       if (s.fullscreen) {
         s.closeFullscreen();
