@@ -18,9 +18,13 @@ import ArtistView from "./components/ArtistView";
 import AlbumView from "./components/AlbumView";
 import AlbumsView from "./components/AlbumsView";
 import ProfileView from "./components/ProfileView";
+import { useAndroidBackButton } from "./hooks/useAndroidBackButton";
 
 function Shell() {
   const { route, navigate } = useRouter();
+
+  // Android BACK closes overlays / navigates in-app instead of exiting (no-op on web).
+  useAndroidBackButton();
 
   const handleSearch = useCallback(
     (q) => {
