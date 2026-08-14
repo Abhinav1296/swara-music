@@ -88,7 +88,7 @@ export default function TopBar({ onSearch }) {
   const showDropdown = focused;
 
   return (
-    <header className="glass sticky top-0 z-30 flex items-center border-b px-4 py-3 md:px-6 md:py-4">
+    <header className="glass sticky top-0 z-30 flex items-center border-b px-4 pb-3 pt-[calc(0.75rem_+_env(safe-area-inset-top))] md:px-6 md:pb-4 md:pt-[calc(1rem_+_env(safe-area-inset-top))]">
       <div ref={wrapRef} className="relative w-full max-w-xl">
         <form onSubmit={submit}>
           <Search

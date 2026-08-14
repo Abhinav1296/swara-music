@@ -320,7 +320,7 @@ export default function FullScreenPlayer() {
           </div>
 
           {/* Top bar */}
-          <div className="flex items-center justify-between px-4 py-4 md:px-8 md:py-6">
+          <div className="flex items-center justify-between px-4 pb-4 pt-[calc(1rem_+_env(safe-area-inset-top))] md:px-8 md:pb-6 md:pt-[calc(1.5rem_+_env(safe-area-inset-top))]">
             <button
               type="button"
               onClick={closeFullscreen}
@@ -557,7 +557,7 @@ export default function FullScreenPlayer() {
                   <div className="absolute inset-0 bg-black/55" />
                 </div>
 
-                <div className="flex items-center gap-2 px-5 pb-3 pt-5">
+                <div className="flex items-center gap-2 px-5 pb-3 pt-[calc(1.25rem_+_env(safe-area-inset-top))]">
                   <div className="flex flex-1 items-center gap-2">
                     <button
                       type="button"

@@ -42,7 +42,7 @@ export default function QueuePanel() {
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 300, damping: 34 }}
-            className="glass-strong fixed right-0 top-0 z-50 flex h-full w-80 max-w-[85vw] flex-col border-l border-white/10 p-4"
+            className="glass-strong fixed right-0 top-0 z-50 flex h-full w-80 max-w-[85vw] flex-col border-l border-white/10 p-4 pt-[calc(1rem_+_env(safe-area-inset-top))]"
           >
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-bold text-white">Queue</h2>
