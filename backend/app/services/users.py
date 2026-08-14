@@ -58,10 +58,18 @@ def get_user(uid: str) -> Optional[Dict[str, Any]]:
     return _users().find_one({"_id": uid})
 
 
+# Max length of a stored avatar data URL (~a 256px JPEG is well under this).
+_MAX_AVATAR_CHARS = 900_000
+
+
 def update_profile(
-    uid: str, name: Optional[str] = None, favorite_singers: Optional[List[str]] = None
+    uid: str,
+    name: Optional[str] = None,
+    favorite_singers: Optional[List[str]] = None,
+    avatar: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     updates: Dict[str, Any] = {}
+    unset: Dict[str, Any] = {}
     if name is not None:
         cleaned = name.strip()[:80]
         if cleaned:
@@ -75,8 +83,21 @@ def update_profile(
                 seen.add(key)
                 cleaned_list.append(v)
         updates["favoriteSingers"] = cleaned_list[:50]
+    if avatar is not None:
+        a = avatar.strip()
+        if a == "":
+            # Empty string clears the custom avatar → fall back to the Google photo.
+            unset["avatar"] = ""
+        elif a.startswith("data:image/") and len(a) <= _MAX_AVATAR_CHARS:
+            updates["avatar"] = a
+        # Anything else (wrong scheme / oversized) is ignored silently.
+    ops: Dict[str, Any] = {}
     if updates:
-        _users().update_one({"_id": uid}, {"$set": updates})
+        ops["$set"] = updates
+    if unset:
+        ops["$unset"] = unset
+    if ops:
+        _users().update_one({"_id": uid}, ops)
     return get_user(uid)
 
 
@@ -88,7 +109,9 @@ def public_user(doc: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         "id": doc.get("_id"),
         "email": doc.get("email"),
         "name": doc.get("name"),
-        "picture": doc.get("picture"),
+        # A user-set custom avatar wins over the Google photo, so the whole
+        # frontend (which reads `user.picture`) shows it everywhere.
+        "picture": doc.get("avatar") or doc.get("picture"),
         "favoriteSingers": doc.get("favoriteSingers", []),
         "createdMs": doc.get("createdMs"),
     }

@@ -44,7 +44,15 @@ export default function TrackMenu({ song, triggerClassName, iconSize = 18, eleva
     if (!open && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect();
       const placeAbove = r.bottom + 260 > window.innerHeight;
-      setCoords({ top: r.bottom, right: window.innerWidth - r.right, above: placeAbove });
+      // Anchor the popover's right edge to the trigger, but clamp so the 208px-wide
+      // (w-52) menu never spills off the left or right edge. Triggers on left-column
+      // cards were pushing the right anchor so far that the menu's left edge went
+      // negative and the labels clipped off-screen.
+      const MENU_W = 208;
+      const MARGIN = 8;
+      const maxRight = Math.max(window.innerWidth - MENU_W - MARGIN, MARGIN);
+      const right = Math.min(Math.max(window.innerWidth - r.right, MARGIN), maxRight);
+      setCoords({ top: r.bottom, right, above: placeAbove });
       setView("main");
       setOpen(true);
     } else {

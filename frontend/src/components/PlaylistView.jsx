@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
+  Camera,
   ChevronLeft,
   ListMusic,
+  Loader2,
   MoreVertical,
   Music2,
   Pause,
@@ -17,6 +19,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { usePlayer } from "../context/PlayerContext";
 import { usePlaylists } from "../context/PlaylistContext";
 import { useRouter } from "../context/RouterContext";
+import { fileToSquareDataUrl } from "../utils/image";
 import TrackRow from "./TrackRow";
 import PlaylistModal from "./PlaylistModal";
 
@@ -28,7 +31,7 @@ import PlaylistModal from "./PlaylistModal";
 export default function PlaylistView() {
   const { route, navigate } = useRouter();
   const { current, isPlaying, play, shuffle, toggleShuffle } = usePlayer();
-  const { getPlaylist, renamePlaylist, deletePlaylist } = usePlaylists();
+  const { getPlaylist, renamePlaylist, deletePlaylist, setPlaylistCover } = usePlaylists();
 
   const id = route.params.id;
   const playlist = getPlaylist(id);
@@ -38,7 +41,24 @@ export default function PlaylistView() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [query, setQuery] = useState("");
+  const [savingCover, setSavingCover] = useState(false);
   const kebabRef = useRef(null);
+  const coverRef = useRef(null);
+
+  const onPickCover = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setSavingCover(true);
+    try {
+      const dataUrl = await fileToSquareDataUrl(file, 256, 0.82);
+      setPlaylistCover(id, dataUrl);
+    } catch {
+      /* keep the current cover on failure */
+    } finally {
+      setSavingCover(false);
+    }
+  };
 
   // Keep the resolved name in sync (deep links may supply a name param).
   const name = playlist?.name || route.params.name || "Playlist";
@@ -127,8 +147,34 @@ export default function PlaylistView() {
         <div className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-accent/25 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-28 left-12 h-72 w-72 rounded-full bg-accent/12 blur-3xl" />
         <div className="glass relative flex flex-col items-center gap-6 p-6 md:flex-row md:gap-8 md:p-8">
-          <div className="relative flex h-40 w-40 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-white/15 to-white/5 shadow-2xl ring-1 ring-white/10 md:h-52 md:w-52">
-            <Music2 size={56} className="text-white/90" />
+          <div className="relative h-40 w-40 shrink-0 md:h-52 md:w-52">
+            <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-white/15 to-white/5 shadow-2xl ring-1 ring-white/10">
+              {playlist.cover ? (
+                <img src={playlist.cover} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <Music2 size={56} className="text-white/90" />
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => coverRef.current?.click()}
+              disabled={savingCover}
+              aria-label="Change playlist cover"
+              className="absolute bottom-1.5 right-1.5 flex h-9 w-9 items-center justify-center rounded-full bg-accent text-white shadow ring-2 ring-black/40 transition hover:brightness-110 disabled:opacity-70"
+            >
+              {savingCover ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <Camera size={16} />
+              )}
+            </button>
+            <input
+              ref={coverRef}
+              type="file"
+              accept="image/*"
+              onChange={onPickCover}
+              className="hidden"
+            />
           </div>
           <div className="relative min-w-0 flex-1 text-center md:text-left">
             <p className="text-xs font-semibold uppercase tracking-widest text-white/50">

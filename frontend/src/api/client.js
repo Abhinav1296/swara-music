@@ -296,7 +296,7 @@ export async function fetchMe(token) {
   return res.json();
 }
 
-/** Update the current user's profile (name / favoriteSingers). Returns { user }. */
+/** Update the current user's profile (name / favoriteSingers / avatar). Returns { user }. */
 export async function updateProfile(token, patch) {
   const res = await fetch(`${BASE}/auth/profile`, {
     method: "PATCH",

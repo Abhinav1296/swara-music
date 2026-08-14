@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Clock, Search, TrendingUp, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useRecentSearches } from "../hooks/useRecentSearches";
@@ -88,7 +89,11 @@ export default function TopBar({ onSearch }) {
   const showDropdown = focused;
 
   return (
-    <header className="glass sticky top-0 z-30 flex items-center border-b px-4 pb-3 pt-[calc(0.75rem_+_env(safe-area-inset-top))] md:px-6 md:pb-4 md:pt-[calc(1rem_+_env(safe-area-inset-top))]">
+    <header
+      className={`glass sticky top-0 flex items-center border-b px-4 pb-3 pt-[calc(0.75rem_+_env(safe-area-inset-top))] md:px-6 md:pb-4 md:pt-[calc(1rem_+_env(safe-area-inset-top))] ${
+        showDropdown ? "z-50" : "z-30"
+      }`}
+    >
       <div ref={wrapRef} className="relative w-full max-w-xl">
         <form onSubmit={submit}>
           <Search
@@ -117,6 +122,27 @@ export default function TopBar({ onSearch }) {
             </button>
           )}
         </form>
+
+        {/* Full-screen dim behind the suggestions — kills the content bleed-through
+            while the search box is focused. Portaled to <body> and z-40 so it also
+            darkens the bottom nav; the header lifts to z-50 so the bar + dropdown
+            stay crisp above it. The dropdown keeps its own glass translucency. */}
+        {createPortal(
+          <AnimatePresence>
+            {showDropdown && (
+              <motion.div
+                key="search-scrim"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15 }}
+                onMouseDown={() => setFocused(false)}
+                className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm"
+              />
+            )}
+          </AnimatePresence>,
+          document.body
+        )}
 
         <AnimatePresence>
           {showDropdown && (

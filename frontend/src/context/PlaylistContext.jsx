@@ -146,6 +146,20 @@ export function PlaylistProvider({ children }) {
     setPlaylists((prev) => prev.map((p) => (p.id === id ? { ...p, name: trimmed } : p)));
   }, []);
 
+  /** Set (data URL) or clear (falsy) a playlist's custom cover art. */
+  const setPlaylistCover = useCallback((id, cover) => {
+    setPlaylists((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        if (!cover) {
+          const { cover: _drop, ...rest } = p;
+          return rest;
+        }
+        return { ...p, cover };
+      })
+    );
+  }, []);
+
   const deletePlaylist = useCallback((id) => {
     setPlaylists((prev) => prev.filter((p) => p.id !== id));
   }, []);
@@ -188,6 +202,7 @@ export function PlaylistProvider({ children }) {
     createPlaylist,
     renamePlaylist,
     deletePlaylist,
+    setPlaylistCover,
     addToPlaylist,
     removeFromPlaylist,
     getPlaylist,

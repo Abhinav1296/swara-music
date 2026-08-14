@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { motion, useMotionValue, useTransform } from "framer-motion";
 import { Heart, ListMusic, Music2, Play, Plus } from "lucide-react";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlaylists } from "../context/PlaylistContext";
@@ -6,9 +7,50 @@ import { usePlayer } from "../context/PlayerContext";
 import { useRouter } from "../context/RouterContext";
 import SongCard from "./SongCard";
 import PlaylistModal from "./PlaylistModal";
+import AddToPlaylistSheet from "./AddToPlaylistSheet";
 
 const GRID =
   "grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6";
+
+/**
+ * A Liked SongCard you can swipe sideways to add to a playlist. A horizontal
+ * drag past the threshold fires `onSwipe(song)`; anything short snaps back and a
+ * tap still plays. An accent hint fades in behind the card as it slides so the
+ * gesture is discoverable. Vertical scrolling stays with the page (touch-pan-y +
+ * dragDirectionLock).
+ */
+function SwipeToAdd({ song, list, onSwipe }) {
+  const x = useMotionValue(0);
+  const hintOpacity = useTransform(x, [-90, -30, 0, 30, 90], [1, 0, 0, 0, 1]);
+
+  return (
+    <div className="relative">
+      <motion.div
+        style={{ opacity: hintOpacity }}
+        className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 rounded-3xl bg-accent/15 text-accent"
+      >
+        <Plus size={20} />
+        <span className="text-sm font-semibold">Add to playlist</span>
+      </motion.div>
+      <motion.div
+        style={{ x }}
+        drag="x"
+        dragDirectionLock
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.35}
+        dragSnapToOrigin
+        onDragEnd={(_, info) => {
+          if (Math.abs(info.offset.x) > 80 || Math.abs(info.velocity.x) > 500) {
+            onSwipe(song);
+          }
+        }}
+        className="relative touch-pan-y"
+      >
+        <SongCard song={song} list={list} />
+      </motion.div>
+    </div>
+  );
+}
 
 /** Local library: liked songs (playlist) + custom playlists + recently played. */
 export default function LibraryView() {
@@ -17,6 +59,7 @@ export default function LibraryView() {
   const { current, isPlaying, play } = usePlayer();
   const { navigate } = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
+  const [sheetSong, setSheetSong] = useState(null);
 
   const likedPlaying =
     likedSongs.length > 0 &&
@@ -71,7 +114,12 @@ export default function LibraryView() {
       ) : (
         <div className={GRID}>
           {likedSongs.map((song) => (
-            <SongCard key={song.id} song={song} list={likedSongs} />
+            <SwipeToAdd
+              key={song.id}
+              song={song}
+              list={likedSongs}
+              onSwipe={setSheetSong}
+            />
           ))}
         </div>
       )}
@@ -109,7 +157,11 @@ export default function LibraryView() {
               className="group flex flex-col gap-3 rounded-3xl p-3 text-left glass transition-colors hover:bg-white/10"
             >
               <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-white/15 to-white/5">
-                <Music2 size={40} className="text-white/90" />
+                {p.cover ? (
+                  <img src={p.cover} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <Music2 size={40} className="text-white/90" />
+                )}
               </div>
               <div className="min-w-0 px-1 pb-1">
                 <h3 className="truncate text-sm font-semibold text-white" title={p.name}>
@@ -152,6 +204,8 @@ export default function LibraryView() {
         onSubmit={handleCreate}
         onClose={() => setCreateOpen(false)}
       />
+
+      <AddToPlaylistSheet song={sheetSong} onClose={() => setSheetSong(null)} />
     </div>
   );
 }

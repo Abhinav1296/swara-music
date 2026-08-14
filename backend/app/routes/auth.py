@@ -18,6 +18,9 @@ class GoogleLoginRequest(BaseModel):
 class ProfileUpdate(BaseModel):
     name: Optional[str] = None
     favoriteSingers: Optional[List[str]] = None
+    # A base64 data URL for a custom avatar, or "" to clear it back to the
+    # Google photo. Validated/size-capped in users_svc.update_profile.
+    avatar: Optional[str] = None
 
 
 async def _current_uid(authorization: Optional[str]) -> str:
@@ -64,6 +67,6 @@ async def update_profile(
     """Update the current user's display name and/or favorite singers."""
     uid = await _current_uid(authorization)
     user = await asyncio.to_thread(
-        users_svc.update_profile, uid, body.name, body.favoriteSingers
+        users_svc.update_profile, uid, body.name, body.favoriteSingers, body.avatar
     )
     return {"user": users_svc.public_user(user)}

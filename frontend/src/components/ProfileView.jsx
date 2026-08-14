@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { Check, Loader2, LogOut, Pencil, RefreshCw, UserRound, X } from "lucide-react";
+import { Camera, Check, Loader2, LogOut, Pencil, RefreshCw, UserRound, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { usePlaylists } from "../context/PlaylistContext";
+import { fileToSquareDataUrl } from "../utils/image";
 import GoogleSignInButton from "./GoogleSignInButton";
 import NativeGoogleSignInButton from "./NativeGoogleSignInButton";
 import { isNativePlatform } from "../auth/nativeGoogleSignIn";
@@ -83,6 +84,24 @@ function ProfileEditor({ logout }) {
   const [fav, setFav] = useState(() => user.favoriteSingers || []);
   const [savingName, setSavingName] = useState(false);
   const [imgOk, setImgOk] = useState(true);
+  const [savingPic, setSavingPic] = useState(false);
+  const fileRef = useRef(null);
+
+  const onPickPhoto = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the user re-pick the same file later
+    if (!file) return;
+    setSavingPic(true);
+    try {
+      const dataUrl = await fileToSquareDataUrl(file, 256, 0.82);
+      await updateProfile({ avatar: dataUrl });
+      setImgOk(true);
+    } catch {
+      /* keep the current picture on failure */
+    } finally {
+      setSavingPic(false);
+    }
+  };
 
   const saveName = async () => {
     const trimmed = name.trim();
@@ -124,20 +143,42 @@ function ProfileEditor({ logout }) {
       <div className="relative mb-8 overflow-hidden rounded-3xl">
         <div className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-accent/25 blur-3xl" />
         <div className="glass relative flex flex-col items-center gap-5 p-7 text-center sm:flex-row sm:gap-6 sm:text-left">
-          <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-full ring-1 ring-white/15">
-            {user.picture && imgOk ? (
-              <img
-                src={user.picture}
-                alt=""
-                referrerPolicy="no-referrer"
-                onError={() => setImgOk(false)}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-accent/50 to-accent/20 text-3xl font-bold text-white">
-                {initial}
-              </div>
-            )}
+          <div className="relative h-24 w-24 shrink-0">
+            <div className="h-24 w-24 overflow-hidden rounded-full ring-1 ring-white/15">
+              {user.picture && imgOk ? (
+                <img
+                  src={user.picture}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  onError={() => setImgOk(false)}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-accent/50 to-accent/20 text-3xl font-bold text-white">
+                  {initial}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={savingPic}
+              aria-label="Change profile photo"
+              className="absolute -bottom-0.5 -right-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-accent text-white shadow ring-2 ring-black/40 transition hover:brightness-110 disabled:opacity-70"
+            >
+              {savingPic ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Camera size={15} />
+              )}
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              onChange={onPickPhoto}
+              className="hidden"
+            />
           </div>
 
           <div className="min-w-0 flex-1">

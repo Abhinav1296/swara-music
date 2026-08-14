@@ -29,6 +29,9 @@ from scraper import db as scraper_db  # noqa: E402
 MAX_PLAYLISTS = 100
 MAX_SONGS_PER_PLAYLIST = 500
 MAX_NAME_LEN = 100
+# A playlist cover is a downscaled 256px JPEG data URL (~30-50KB); cap it so a
+# bad payload can't blow past Mongo's 16MB document limit across many playlists.
+MAX_COVER_CHARS = 400_000
 
 
 def _playlists_col():
@@ -74,7 +77,15 @@ def _clean_playlist(pl: Any) -> Optional[Dict[str, Any]]:
     created = pl.get("createdAt")
     if not isinstance(created, (int, float)):
         created = _now_ms()
-    return {"id": pid, "name": name, "songs": songs, "createdAt": created}
+    out: Dict[str, Any] = {"id": pid, "name": name, "songs": songs, "createdAt": created}
+    # Optional user-set cover art (base64 image data URL). Preserve it verbatim
+    # when valid and within bounds; otherwise drop it silently.
+    cover = pl.get("cover")
+    if isinstance(cover, str):
+        c = cover.strip()
+        if c.startswith("data:image/") and len(c) <= MAX_COVER_CHARS:
+            out["cover"] = c
+    return out
 
 
 def _sanitize(playlists: Any) -> List[Dict[str, Any]]:
