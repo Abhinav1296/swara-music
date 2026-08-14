@@ -4,6 +4,8 @@ import { Check, Loader2, LogOut, Pencil, RefreshCw, UserRound, X } from "lucide-
 import { useAuth } from "../context/AuthContext";
 import { usePlaylists } from "../context/PlaylistContext";
 import GoogleSignInButton from "./GoogleSignInButton";
+import NativeGoogleSignInButton from "./NativeGoogleSignInButton";
+import { isNativePlatform } from "../auth/nativeGoogleSignIn";
 
 // Suggested singers to seed the "favorites" picker (users can add any others).
 const SUGGESTED_SINGERS = [
@@ -55,6 +57,8 @@ export default function ProfileView() {
               <div className="mt-6 flex justify-center">
                 {loading ? (
                   <Loader2 size={22} className="animate-spin text-white/60" />
+                ) : isNativePlatform() ? (
+                  <NativeGoogleSignInButton onCredential={onCredential} onError={setLoginErr} />
                 ) : (
                   <GoogleSignInButton onCredential={onCredential} onError={setLoginErr} />
                 )}

@@ -91,8 +91,21 @@ jobs:
 
       - name: Build debug APK
         working-directory: frontend/android
+        env:
+          # Stable signing key (base64 PKCS12 + its password) stored as repo
+          # secrets so Google Sign-In sees a fixed SHA-1. If the secrets aren't
+          # set the build still runs, just with the default (unstable) key.
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SWARA_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           chmod +x ./gradlew
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/swara-signing.p12"
+            export SWARA_KEYSTORE_FILE="$RUNNER_TEMP/swara-signing.p12"
+            echo "Signing debug APK with the stable Swara keystore."
+          else
+            echo "No signing secret set — using the default (unstable) debug keystore."
+          fi
           ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK

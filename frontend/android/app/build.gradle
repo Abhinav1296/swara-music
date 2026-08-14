@@ -16,6 +16,25 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        // Google Sign-In requires the installed APK to be signed by a key whose
+        // SHA-1 is registered on the Android OAuth client. The default debug
+        // keystore is regenerated (random SHA-1) on every CI runner, which would
+        // break sign-in. When CI provides SWARA_KEYSTORE_FILE (decoded from the
+        // ANDROID_KEYSTORE_BASE64 secret), sign with that stable PKCS12 key
+        // instead; otherwise fall back to the default debug keystore so local /
+        // secret-less builds still work.
+        debug {
+            def ksPath = System.getenv("SWARA_KEYSTORE_FILE")
+            if (ksPath?.trim()) {
+                storeFile file(ksPath)
+                storeType "PKCS12"
+                storePassword System.getenv("SWARA_KEYSTORE_PASSWORD")
+                keyAlias "swara"
+                keyPassword System.getenv("SWARA_KEYSTORE_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
