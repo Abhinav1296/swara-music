@@ -13,6 +13,10 @@ on:
         description: "Backend API base URL. Defaults to the live Swara backend; leave as-is for a normal build."
         required: false
         default: "https://swara-backend-9kra.onrender.com/api"
+      live_reload_url:
+        description: "OPTIONAL live-reload: your dev server URL (e.g. http://192.168.1.2:5173). Fill this to get an APK that loads the LIVE dev server (phone must be on the same Wi-Fi, dev server running). Leave EMPTY for a normal standalone APK."
+        required: false
+        default: ""
 
 jobs:
   build:
@@ -45,6 +49,28 @@ jobs:
         env:
           VITE_API_BASE: ${{ github.event.inputs.api_base }}
           VITE_GOOGLE_CLIENT_ID: "398262049439-05f556d8doi820o3d3c365cmsi0dtsfl.apps.googleusercontent.com"
+
+      # LIVE-RELOAD (opt-in): if a dev URL was provided, point the app at it.
+      # This makes the WebView load the running dev server instead of the bundled
+      # web assets, so every code edit shows up live in the real native shell.
+      # Runs BEFORE cap sync so the server config is copied into the Android
+      # project (and Capacitor auto-adds usesCleartextTraffic for the http URL).
+      # This ONLY happens when the live_reload_url field is filled at run time —
+      # the committed config stays production-clean.
+      - name: Enable live-reload (optional)
+        if: ${{ github.event.inputs.live_reload_url != '' }}
+        working-directory: frontend
+        env:
+          LR_URL: ${{ github.event.inputs.live_reload_url }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = 'capacitor.config.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+            c.server = Object.assign({}, c.server, { url: process.env.LR_URL, cleartext: true });
+            fs.writeFileSync(p, JSON.stringify(c, null, 2));
+            console.log('Live-reload enabled -> server.url =', c.server.url);
+          "
 
       - name: Capacitor sync
         working-directory: frontend
