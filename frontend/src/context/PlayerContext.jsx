@@ -10,6 +10,7 @@ import { loadJSON, saveJSON, STORAGE_KEYS } from "../utils/storage";
 import { useLibrary } from "./LibraryContext";
 import { getRelated, getSongDetails } from "../api/client";
 import { normalizeLyrics, normalizeTrack } from "../utils/trackAdapter";
+import { MediaSession } from "@capgo/capacitor-media-session";
 
 /**
  * Global audio player + queue.
@@ -56,6 +57,22 @@ function delay(ms) {
 function pickFromPool(pool) {
   if (!pool || pool.length === 0) return null;
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/**
+ * Fire a MediaSession bridge call without ever letting a failure bubble.
+ * On Android the Capgo plugin renders the real system notification; on web it
+ * proxies to navigator.mediaSession; on anything unsupported the call may no-op
+ * or reject — either way we swallow it so the notification layer can never
+ * break playback.
+ */
+function safeMedia(op) {
+  try {
+    const r = op();
+    if (r && typeof r.catch === "function") r.catch(() => {});
+  } catch {
+    /* media session unavailable — ignore */
+  }
 }
 
 export function PlayerProvider({ children }) {
@@ -677,6 +694,17 @@ export function PlayerProvider({ children }) {
     setProgress(value);
   }, []);
 
+  // --- Refs mirroring latest transport for the media-session handlers -------
+  // The OS notification / lock-screen controls call into these; using refs lets
+  // us register the native handlers ONCE (below) yet always invoke the freshest
+  // fn + play state without re-registering on every render.
+  const goPrevRef = useRef(null);
+  goPrevRef.current = goPrev;
+  const seekRef = useRef(null);
+  seekRef.current = seek;
+  const isPlayingRef = useRef(false);
+  isPlayingRef.current = isPlaying;
+
   // --- Audio element wiring ------------------------------------------------
 
   // Wire up transport events once.
@@ -761,6 +789,70 @@ export function PlayerProvider({ children }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // --- Media session: OS notification + lock-screen controls (A1/A2) --------
+  // Binds the native media notification to our transport. Handlers register
+  // ONCE and dispatch through refs (always the freshest fn); metadata, play
+  // state and scrub position are pushed as they change. On Android the Capgo
+  // plugin draws the real system notification + lock-screen controls; on web it
+  // drives navigator.mediaSession. All calls are failure-swallowed.
+  useEffect(() => {
+    const handlers = [
+      ["play", () => { if (!isPlayingRef.current) toggleRef.current?.(); }],
+      ["pause", () => { if (isPlayingRef.current) toggleRef.current?.(); }],
+      ["previoustrack", () => goPrevRef.current?.()],
+      ["nexttrack", () => goNextRef.current?.()],
+      ["seekto", (d) => {
+        if (d && typeof d.seekTime === "number") seekRef.current?.(d.seekTime);
+      }],
+      ["stop", () => { if (isPlayingRef.current) toggleRef.current?.(); }],
+    ];
+    handlers.forEach(([action, handler]) =>
+      safeMedia(() => MediaSession.setActionHandler({ action }, handler))
+    );
+    return () => {
+      handlers.forEach(([action]) =>
+        safeMedia(() => MediaSession.setActionHandler({ action }, null))
+      );
+    };
+  }, []);
+
+  // Push track metadata (title / artist / album / artwork) on every change.
+  useEffect(() => {
+    if (!current) return;
+    const art = current.artworkUrl600 || current.artworkUrl100 || "";
+    safeMedia(() =>
+      MediaSession.setMetadata({
+        title: current.trackName || "",
+        artist: current.artistName || "",
+        album: current.collectionName || "",
+        artwork: art ? [{ src: art, sizes: "512x512", type: "image/jpeg" }] : [],
+      })
+    );
+  }, [current]);
+
+  // Reflect play/pause so the notification button + lock-screen state stay live.
+  useEffect(() => {
+    const playbackState = !current ? "none" : isPlaying ? "playing" : "paused";
+    safeMedia(() => MediaSession.setPlaybackState({ playbackState }));
+  }, [isPlaying, current]);
+
+  // Feed scrub position (throttled to ~1/sec) so the lock-screen scrubber
+  // tracks playback without spamming the native bridge on every tick.
+  const lastPosSecRef = useRef(-1);
+  useEffect(() => {
+    if (!current || !duration) return;
+    const sec = Math.floor(progress);
+    if (sec === lastPosSecRef.current) return;
+    lastPosSecRef.current = sec;
+    safeMedia(() =>
+      MediaSession.setPositionState({
+        duration,
+        position: Math.min(progress, duration),
+        playbackRate: 1,
+      })
+    );
+  }, [progress, duration, current]);
 
   const value = {
     current,
