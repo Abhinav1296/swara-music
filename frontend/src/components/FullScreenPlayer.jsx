@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { createPortal } from "react-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   Layers,
@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
+import { useRouter } from "../context/RouterContext";
 import LikeButton from "./LikeButton";
 import { formatTime } from "../utils/format";
 import { resolveActiveLine } from "../lyrics/lyrics";
@@ -63,8 +64,9 @@ export default function FullScreenPlayer() {
     retry,
     pendingTabRef,
   } = usePlayer();
+  const { route, navigate } = useRouter();
 
-  const [rightPanel, setRightPanel] = useState("lyrics"); // "none" | "lyrics" | "upnext"
+  const [rightPanel, setRightPanel] = useState("none"); // "none" | "lyrics" | "upnext"
   const togglePanel = (p) => setRightPanel((cur) => (cur === p ? "none" : p));
   const [lyricScript, setLyricScript] = useState("telugu"); // "telugu" | "roman"
   const [versionsOpen, setVersionsOpen] = useState(false);
@@ -72,6 +74,24 @@ export default function FullScreenPlayer() {
   // lyrics + its label). Null = show the backend's default lyrics.
   const [overrideLyrics, setOverrideLyrics] = useState(null);
   const [overrideLabel, setOverrideLabel] = useState(null);
+
+  // Swipe the cover art left/right to move to the next / previous track (the
+  // Apple-Music gesture). Anchored to the artwork only, so the seek and volume
+  // sliders — also horizontal drags — are never mistaken for a track swipe.
+  const coverTouch = useRef(null);
+  const onCoverTouchStart = (e) => {
+    const t = e.touches[0];
+    coverTouch.current = { x: t.clientX, y: t.clientY };
+  };
+  const onCoverTouchEnd = (e) => {
+    const start = coverTouch.current;
+    coverTouch.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) (dx < 0 ? next : prev)();
+  };
 
   // Esc closes; lock body scroll while open.
   useEffect(() => {
@@ -81,15 +101,53 @@ export default function FullScreenPlayer() {
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen, closeFullscreen]);
 
-  // Honor a panel requested when the player opened via openFullscreen(tab).
-  // Only jumps when a specific tab was requested.
+  // Navigating to another page while the player is open (e.g. "Go to Album /
+  // Artist" from the ••• menu, or tapping the artist name) must dismiss the
+  // player — otherwise you land on that page hidden BEHIND the full-screen
+  // overlay and think nothing happened. `navigate` makes a fresh route object
+  // each call, so a reference change means a real navigation just occurred.
+  const lastRouteRef = useRef(route);
+  useEffect(() => {
+    if (lastRouteRef.current === route) return undefined;
+    lastRouteRef.current = route;
+    if (fullscreen) closeFullscreen();
+    return undefined;
+  }, [route, fullscreen, closeFullscreen]);
+
+  // C3 — auto-hide the transport (Apple-style). While a track is PLAYING on the
+  // pure artwork view, the top bar + controls fade after a few seconds of
+  // stillness; any tap brings them back (and restarts the countdown). When
+  // paused or with a lyrics/up-next panel open, controls always stay put.
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const hideTimer = useRef(null);
+  const canAutoHide = fullscreen && isPlaying && rightPanel === "none";
+  const revealControls = useCallback(() => {
+    setControlsVisible(true);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    if (canAutoHide) hideTimer.current = setTimeout(() => setControlsVisible(false), 3800);
+  }, [canAutoHide]);
+  useEffect(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    if (!canAutoHide) {
+      setControlsVisible(true);
+      return undefined;
+    }
+    setControlsVisible(true);
+    hideTimer.current = setTimeout(() => setControlsVisible(false), 3800);
+    return () => hideTimer.current && clearTimeout(hideTimer.current);
+  }, [canAutoHide, current?.id]);
+  const controlsFadeCls = `transition-opacity duration-500 ${
+    controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
+  }`;
+
+  // Every time the player opens, land on the artwork/player view — unless a
+  // specific panel was requested via openFullscreen(tab). This also clears a
+  // panel left open from a previous session so reopening never starts on lyrics.
   useEffect(() => {
     if (!fullscreen) return undefined;
     const t = pendingTabRef?.current;
-    if (t) {
-      setRightPanel(t);
-      pendingTabRef.current = null;
-    }
+    setRightPanel(t || "none");
+    pendingTabRef.current = null;
     return undefined;
   }, [fullscreen, pendingTabRef]);
 
@@ -326,6 +384,7 @@ export default function FullScreenPlayer() {
           className="fixed inset-0 z-[80] flex flex-col overflow-hidden text-white"
           role="dialog"
           aria-modal="true"
+          onClick={revealControls}
         >
           {/* Ambient color-wash backdrop — saturated bleed from the artwork,
               darkened toward the corners (Apple's lyrics ambiance). */}
@@ -340,8 +399,8 @@ export default function FullScreenPlayer() {
             <div className="absolute inset-0 bg-gradient-to-br from-black/30 via-black/55 to-black/80" />
           </div>
 
-          {/* Top bar */}
-          <div className="flex items-center justify-between px-4 pb-4 pt-[calc(1rem_+_env(safe-area-inset-top))] md:px-8 md:pb-6 md:pt-[calc(1.5rem_+_env(safe-area-inset-top))]">
+          {/* Top bar — fades with the transport controls (C3). */}
+          <div className={`flex items-center justify-between px-4 pb-4 pt-[calc(1rem_+_env(safe-area-inset-top))] md:px-8 md:pb-6 md:pt-[calc(1.5rem_+_env(safe-area-inset-top))] ${controlsFadeCls}`}>
             <button
               type="button"
               onClick={closeFullscreen}
@@ -367,7 +426,11 @@ export default function FullScreenPlayer() {
                 on mobile so the controls fill the screen instead of piling at the
                 top (collapses to top-aligned if a small phone ever overflows). */}
             <div className="mx-auto my-auto flex w-full max-w-md flex-col items-center md:mx-0">
-              <div className="relative w-full max-w-[min(76vw,22rem)]">
+              <div
+                className="relative w-full max-w-[min(76vw,22rem)] touch-pan-y select-none"
+                onTouchStart={onCoverTouchStart}
+                onTouchEnd={onCoverTouchEnd}
+              >
                 <motion.img
                   key={current.id}
                   initial={{ scale: 0.92, opacity: 0 }}
@@ -385,19 +448,30 @@ export default function FullScreenPlayer() {
                 )}
               </div>
 
-              {/* Title + like */}
-              <div className="mt-8 flex w-full items-center justify-between gap-4">
+              {/* Title + like — tight title/artist pair (C4). */}
+              <div className="mt-6 flex w-full items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <h1 className="truncate text-2xl font-extrabold tracking-tight md:text-3xl" title={current.trackName}>
+                  <h1 className="truncate text-2xl font-extrabold leading-tight tracking-tight md:text-3xl" title={current.trackName}>
                     {current.trackName}
                   </h1>
-                  <p className="truncate text-base text-white/60" title={current.artistName}>
-                    {current.artistName}
-                  </p>
+                  {current.artistName ? (
+                    <button
+                      type="button"
+                      onClick={() => navigate("artist", { name: current.artistName })}
+                      className="mt-1 block w-full truncate text-left text-[0.95rem] font-medium text-white/55 transition hover:text-white active:text-white"
+                      title={`Go to ${current.artistName}`}
+                    >
+                      {current.artistName}
+                    </button>
+                  ) : null}
                 </div>
                 <LikeButton song={current} className="h-11 w-11 shrink-0 bg-white/10" size={22} />
               </div>
 
+              {/* Transport cluster — seek / play / volume / panel toggles. This
+                  whole group auto-hides together (C3); the artwork + title above
+                  stay visible so the view never looks empty. */}
+              <div className={`w-full ${controlsFadeCls}`}>
               {/* Seek */}
               <div className="mt-6 w-full">
                 <div className="relative">
@@ -422,7 +496,7 @@ export default function FullScreenPlayer() {
               </div>
 
               {/* Transport */}
-              <div className="mt-4 flex w-full items-center justify-between">
+              <div className="mt-5 flex w-full items-center justify-between">
                 <button
                   type="button"
                   onClick={toggleShuffle}
@@ -477,7 +551,7 @@ export default function FullScreenPlayer() {
               </div>
 
               {/* Volume */}
-              <div className="mt-6 flex w-full items-center gap-3">
+              <div className="mt-5 flex w-full items-center gap-3">
                 <button
                   type="button"
                   onClick={() => setVolume(volume > 0 ? 0 : 0.8)}
@@ -503,7 +577,7 @@ export default function FullScreenPlayer() {
 
               {/* Lyrics / Up Next toggles — separate buttons, mobile + desktop.
                   Toggling the active one off returns to the album-only view. */}
-              <div className="mt-6 flex w-full items-center gap-2">
+              <div className="mt-5 flex w-full items-center gap-2">
                 <button
                   type="button"
                   onClick={() => togglePanel("lyrics")}
@@ -521,6 +595,8 @@ export default function FullScreenPlayer() {
                   <ListMusic size={17} /> Up Next
                 </button>
               </div>
+              </div>
+              {/* end transport cluster (C3 auto-hide group) */}
 
               {/* Stream resolution status (glass error / resolving states) */}
               {streamError && (

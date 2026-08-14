@@ -2,7 +2,6 @@ import { useRef } from "react";
 import {
   ListMusic,
   Maximize2,
-  Music2,
   Pause,
   Play,
   Repeat,
@@ -42,10 +41,43 @@ export default function NowPlayingBar() {
     toggleQueue,
     seek,
     openFullscreen,
+    stop,
   } = usePlayer();
   const prevVolume = useRef(0.8);
+  const touchStart = useRef(null);
+
+  // Cold open: no track chosen yet → don't render the bar at all. It appears
+  // only once a song is actually loaded/playing.
+  if (!current) return null;
 
   const pct = duration ? Math.min(100, (progress / duration) * 100) : 0;
+
+  // Swipe gestures on the mini bar (mobile). A deliberate drag (>60px) in the
+  // dominant axis fires exactly one action, so taps on the transport buttons and
+  // small motions never trigger one:
+  //   ← / →  next / previous track
+  //   ↓      stop playback and dismiss the bar
+  //   ↑      open the full-screen player
+  const onTouchStart = (e) => {
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const onTouchEnd = (e) => {
+    const start = touchStart.current;
+    touchStart.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    const THRESH = 60;
+    if (Math.abs(dx) > Math.abs(dy)) {
+      if (dx <= -THRESH) next();
+      else if (dx >= THRESH) prev();
+    } else {
+      if (dy >= THRESH) stop();
+      else if (dy <= -THRESH) openFullscreen();
+    }
+  };
 
   const onVolumeClick = () => {
     if (volume > 0) {
@@ -63,7 +95,11 @@ export default function NowPlayingBar() {
     isResolvingStream && !isPlaying && !(current?.streamUrl && progress > 0);
 
   return (
-    <div className="glass fixed bottom-[calc(4rem_+_env(safe-area-inset-bottom))] left-0 right-0 z-30 flex items-center gap-3 border-t px-3 py-2 md:bottom-0 md:gap-4 md:px-6 md:py-3">
+    <div
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      className="glass fixed bottom-[calc(4rem_+_env(safe-area-inset-bottom))] left-0 right-0 z-30 flex items-center gap-3 border-t px-3 py-2 md:bottom-0 md:gap-4 md:px-6 md:py-3"
+    >
       {/* Mobile thin progress line */}
       <div className="absolute left-0 right-0 top-0 h-0.5 bg-white/10 md:hidden">
         <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
@@ -71,61 +107,47 @@ export default function NowPlayingBar() {
 
       {/* Track info */}
       <div className="flex min-w-0 flex-1 items-center gap-3 md:w-72 md:flex-none">
-        {current ? (
-          <>
-            <button
-              type="button"
-              onClick={openFullscreen}
-              aria-label="Open full-screen player"
-              className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-xl shadow-lg md:h-14 md:w-14"
-            >
-              <img
-                src={current.artworkUrl100}
-                alt=""
-                className="h-full w-full object-cover"
-              />
-              <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-                <Maximize2 size={16} className="text-white" />
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={openFullscreen}
-              className="min-w-0 flex-1 text-left"
-              aria-label="Open full-screen player"
-            >
-              <p className="truncate text-sm font-semibold text-white" title={current.trackName}>
-                {current.trackName}
-              </p>
-              <p className="truncate text-xs text-white/50" title={current.artistName}>
-                {current.artistName}
-              </p>
-              {showResolving && (
-                <p className="truncate text-[11px] text-accent/90">Resolving full song…</p>
-              )}
-              {!showResolving && streamError && !isPlaying && (
-                <p className="truncate text-[11px] text-white/40">
-                  {streamError === "no_stream" || streamError === "not_found"
-                    ? "Stream unavailable"
-                    : streamError === "rate_limited"
-                    ? "Rate limited — retrying…"
-                    : "Playback error"}
-                </p>
-              )}
-            </button>
-            <LikeButton song={current} className="ml-1 h-8 w-8 md:hidden" />
-          </>
-        ) : (
-          <>
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/5 md:h-14 md:w-14">
-              <Music2 size={22} className="text-white/40" />
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-white/40">Nothing playing</p>
-              <p className="truncate text-xs text-white/30">Pick a song to preview</p>
-            </div>
-          </>
-        )}
+        <button
+          type="button"
+          onClick={() => openFullscreen()}
+          aria-label="Open full-screen player"
+          className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-xl shadow-lg md:h-14 md:w-14"
+        >
+          <img
+            src={current.artworkUrl100}
+            alt=""
+            className="h-full w-full object-cover"
+          />
+          <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+            <Maximize2 size={16} className="text-white" />
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => openFullscreen()}
+          className="min-w-0 flex-1 text-left"
+          aria-label="Open full-screen player"
+        >
+          <p className="truncate text-sm font-semibold text-white" title={current.trackName}>
+            {current.trackName}
+          </p>
+          <p className="truncate text-xs text-white/50" title={current.artistName}>
+            {current.artistName}
+          </p>
+          {showResolving && (
+            <p className="truncate text-[11px] text-accent/90">Resolving full song…</p>
+          )}
+          {!showResolving && streamError && !isPlaying && (
+            <p className="truncate text-[11px] text-white/40">
+              {streamError === "no_stream" || streamError === "not_found"
+                ? "Stream unavailable"
+                : streamError === "rate_limited"
+                ? "Rate limited — retrying…"
+                : "Playback error"}
+            </p>
+          )}
+        </button>
+        <LikeButton song={current} className="ml-1 h-8 w-8 md:hidden" />
       </div>
 
       {/* Transport + progress */}
@@ -248,10 +270,9 @@ export default function NowPlayingBar() {
 
         <button
           type="button"
-          onClick={openFullscreen}
-          disabled={!current}
+          onClick={() => openFullscreen()}
           aria-label="Open full-screen player"
-          className="rounded-full p-2 text-white/60 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+          className="rounded-full p-2 text-white/60 transition hover:bg-white/10 hover:text-white"
         >
           <Maximize2 size={17} />
         </button>

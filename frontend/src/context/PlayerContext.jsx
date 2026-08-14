@@ -66,7 +66,13 @@ function pickFromPool(pool) {
  * or reject — either way we swallow it so the notification layer can never
  * break playback.
  */
+// TEMP DIAGNOSTIC (revert to true once the Android launch crash is fixed):
+// when false, every native MediaSession bridge call is skipped so we can prove
+// whether the @capgo media-session plugin is what's crashing the app on launch.
+const MEDIA_SESSION_ENABLED = false;
+
 function safeMedia(op) {
+  if (!MEDIA_SESSION_ENABLED) return;
   try {
     const r = op();
     if (r && typeof r.catch === "function") r.catch(() => {});
@@ -681,6 +687,35 @@ export function PlayerProvider({ children }) {
 
   const clearQueue = useCallback(() => setUpcoming([]), []);
 
+  /**
+   * Full stop: pause audio, drop the source, and clear the entire transport
+   * (current track + queue + history). The mobile Now-Playing bar calls this on
+   * a downward swipe so the bar unmounts (it's gated on `current`) and playback
+   * ends. Any in-flight stream resolve is aborted + token-bumped so a late
+   * result can't revive the track we just cleared.
+   */
+  const stop = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    resolveTokenRef.current += 1;
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+    }
+    wantPlayRef.current = false;
+    setIsResolvingStream(false);
+    setStreamError(null);
+    setIsPlaying(false);
+    setProgress(0);
+    setDuration(0);
+    progressRef.current = 0;
+    setCurrent(null);
+    setUpcoming([]);
+    setPlayed([]);
+  }, []);
+
   const toggleShuffle = useCallback(() => setShuffleState((s) => !s), []);
   const cycleRepeat = useCallback(
     () => setRepeatState((r) => REPEAT_CYCLE[(REPEAT_CYCLE.indexOf(r) + 1) % REPEAT_CYCLE.length]),
@@ -880,6 +915,7 @@ export function PlayerProvider({ children }) {
     addToQueue,
     removeFromQueue,
     clearQueue,
+    stop,
     toggleShuffle,
     cycleRepeat,
     setVolume,
@@ -890,7 +926,10 @@ export function PlayerProvider({ children }) {
     // Open the full-screen player, optionally on a specific right-panel tab
     // ("upnext" | "lyrics"). The tab request is read once on open.
     openFullscreen: (tab) => {
-      if (tab) pendingTabRef.current = tab;
+      // Only honor an explicit string tab ("upnext" | "lyrics"). Guards against
+      // callers wired as onClick={openFullscreen}, which would otherwise pass the
+      // click event as `tab` and force the lyrics panel open on every tap.
+      if (typeof tab === "string" && tab) pendingTabRef.current = tab;
       setFullscreen(true);
     },
     closeFullscreen: () => setFullscreen(false),

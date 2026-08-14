@@ -142,9 +142,45 @@ export default function HomeView() {
   }, [trending, shelfSongs]);
 
   // ── Rotating hero ──────────────────────────────────────────────────────────
-  const heroItems = useMemo(() => trending.slice(0, 5), [trending]);
+  // Freshness: JioSaavn's trending feed is cached ~12h server-side, so without
+  // this the hero would show the SAME top-5 in the SAME order on every open. We
+  // pick a random start offset ONCE per app-open (heroSeed) and rotate a wider
+  // slice of the feed to begin there — so each open surfaces a different Featured
+  // song while still drawing only from real trending tracks.
+  const [heroSeed] = useState(() => Math.random());
+  const heroItems = useMemo(() => {
+    const pool = trending.slice(0, 10);
+    if (pool.length <= 1) return pool;
+    const start = Math.floor(heroSeed * pool.length) % pool.length;
+    return [...pool.slice(start), ...pool.slice(0, start)];
+  }, [trending, heroSeed]);
   const [heroIdx, setHeroIdx] = useState(0);
   const [heroPaused, setHeroPaused] = useState(false);
+  const heroTouch = useRef(null);
+
+  // Swipe the hero left/right to move to the next / previous featured song.
+  // Mirrors the now-playing-bar gesture: only a deliberate horizontal drag
+  // (>50px, horizontal-dominant) counts, so vertical page scrolling is untouched.
+  const swipeHero = (dir) => {
+    const n = heroItems.length;
+    if (n <= 1) return;
+    setHeroIdx((i) => (i + dir + n) % n);
+  };
+  const onHeroTouchStart = (e) => {
+    const t = e.touches[0];
+    heroTouch.current = { x: t.clientX, y: t.clientY };
+    setHeroPaused(true); // hold auto-rotate while the finger is down
+  };
+  const onHeroTouchEnd = (e) => {
+    const start = heroTouch.current;
+    heroTouch.current = null;
+    setHeroPaused(false); // resume with a fresh timer after the gesture
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)) swipeHero(dx < 0 ? 1 : -1);
+  };
 
   // Keep the index valid as the list loads/changes.
   useEffect(() => {
@@ -177,9 +213,11 @@ export default function HomeView() {
       {/* Cinematic rotating hero */}
       {featured ? (
         <div
-          className="glass relative mb-6 overflow-hidden rounded-3xl"
+          className="glass relative mb-6 touch-pan-y overflow-hidden rounded-3xl"
           onMouseEnter={() => setHeroPaused(true)}
           onMouseLeave={() => setHeroPaused(false)}
+          onTouchStart={onHeroTouchStart}
+          onTouchEnd={onHeroTouchEnd}
         >
           {/* Ambient blurred-art backdrop (crossfades as the hero rotates) */}
           <div className="absolute inset-0 -z-10 overflow-hidden bg-black">

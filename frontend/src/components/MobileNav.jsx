@@ -17,7 +17,7 @@ export default function MobileNav() {
   const active = route.name;
 
   return (
-    <nav className="glass fixed bottom-0 left-0 right-0 z-40 flex border-t pb-[env(safe-area-inset-bottom)] md:hidden">
+    <nav className="glass fixed bottom-0 left-0 right-0 z-40 flex h-[calc(4rem_+_env(safe-area-inset-bottom))] border-t pb-[env(safe-area-inset-bottom)] md:hidden">
       {ITEMS.map(({ id, label, icon: Icon }) => {
         const isActive = active === id;
         const showAvatar = id === "profile" && isAuthed && user?.picture;
@@ -26,7 +26,7 @@ export default function MobileNav() {
             key={id}
             type="button"
             onClick={() => navigate(id)}
-            className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors ${
+            className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2.5 text-[11px] font-medium transition-colors ${
               isActive ? "text-accent" : "text-white/55"
             }`}
           >
