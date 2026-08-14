@@ -66,10 +66,13 @@ function pickFromPool(pool) {
  * or reject — either way we swallow it so the notification layer can never
  * break playback.
  */
-// TEMP DIAGNOSTIC (revert to true once the Android launch crash is fixed):
-// when false, every native MediaSession bridge call is skipped so we can prove
-// whether the @capgo media-session plugin is what's crashing the app on launch.
-const MEDIA_SESSION_ENABLED = false;
+// Master switch for the native MediaSession bridge (notification + lock-screen +
+// OEM "island"/capsule controls). It was temporarily disabled after the APK
+// crashed on launch — root cause was the plugin's `mediaPlayback` foreground
+// service throwing SecurityException on targetSdk 36 without the
+// FOREGROUND_SERVICE_MEDIA_PLAYBACK permission, which was since added (04695f1).
+// Re-enabled now; if a launch crash recurs, gate this false again and lazy-init.
+const MEDIA_SESSION_ENABLED = true;
 
 function safeMedia(op) {
   if (!MEDIA_SESSION_ENABLED) return;
