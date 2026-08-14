@@ -601,9 +601,41 @@ def _stream_sync(artist: str, song: Optional[str], url: Optional[str]) -> Option
 
 # ── public async interface (mirrors app.services.lyrica) ─────────────────────
 async def search_songs(query: str, limit: Optional[int] = None) -> Dict[str, Any]:
+    """Song search — JioSaavn's OWN results (their flow), Telugu-preferred, so a
+    query behaves here exactly like it does on JioSaavn itself. This replaces the
+    old Mongo ``$text`` keyword search, which degraded phrase queries like
+    "telugu romantic songs" into an OR-match on generic tokens (telugu/songs) and
+    surfaced unrelated genres (e.g. Christian compilations literally titled
+    "…Telugu…Songs"). Each result's raw record is remembered by perma_url so play
+    and details are instant at click time. If JioSaavn is unreachable or returns
+    nothing, we fall back to our own catalog text search so search still works
+    offline. Lyrics stay vetted: a tapped JioSaavn track resolves to our catalog
+    doc (and its real lyrics) when we have it, and honestly reports none when we
+    don't — we never fabricate coverage.
+
+    Unlike the fixed mood shelves (``search_jiosaavn_tracks``), typed queries are
+    unbounded, so we deliberately do NOT stash them in the 12h home cache."""
     limit = _clamp(limit)
-    results = await asyncio.to_thread(_search_sync, query, limit)
-    return {"query": query or "", "count": len(results), "results": results, "source": SOURCE}
+    q = (query or "").strip()
+    if not q:
+        return {"query": "", "count": 0, "results": [], "source": SOURCE}
+
+    songs: List[Dict[str, Any]] = []
+    try:
+        recs = await saavn_api.search_songs(q, limit=max(limit * 2, 20))
+        telugu = [r for r in recs if (r.get("language") or "").lower() == "telugu"]
+        for rec in (telugu or recs)[:limit]:
+            perma = rec.get("perma_url")
+            if perma:
+                _HOME_REC[perma] = rec            # remember it for play/details later
+            songs.append(_jiosaavn_to_song(rec, resolve_stream(rec.get("encrypted_media_url") or "")))
+    except Exception as exc:  # noqa: BLE001 - any JioSaavn failure falls back to catalog
+        logger.warning("jiosaavn search failed for %r: %s", q, exc)
+
+    if not songs:
+        db = await asyncio.to_thread(_search_sync, q, limit)
+        return {"query": q, "count": len(db), "results": db, "source": SOURCE}
+    return {"query": q, "count": len(songs), "results": songs, "source": SOURCE}
 
 
 # ── live JioSaavn home rows (Trending / mood shelves, refreshed daily) ────────

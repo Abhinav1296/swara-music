@@ -611,39 +611,16 @@ def _to_search_song(artist: str, title: str, js: Optional[Dict[str, Any]]) -> Di
 
 
 async def search_songs(query: str, limit: Optional[int] = None) -> Dict[str, Any]:
-    """Telugu-biased search.
+    """Telugu-biased typed search — routed entirely through JioSaavn.
 
-    Calls Lyrica ``/suggestion`` for the catalog list and enriches each result
-    with JioSaavn artwork + ``perma_url`` (best effort, never fails the search).
-    The catalog and the JioSaavn enrichment are independent, so they run
-    concurrently. Results are cached (TTL) and concurrent identical queries
-    coalesce into a single upstream call.
+    Typed queries and "See All" grids use the SAME JioSaavn flow as the Home
+    mood shelves (``search_jiosaavn_tracks``), NOT Lyrica ``/suggestion``.
+    ``/suggestion`` mixes wrong-genre compilation tracks into broad terms
+    (e.g. Christian songs surfacing for "telugu romantic songs"), whereas
+    JioSaavn returns real, artwork-rich, stream-ready Telugu results. One flow
+    for everything — no bespoke keyword matching to go wrong.
     """
-    term = normalize_query(query)
-    limit = min(max(limit or settings.DEFAULT_LIMIT, 1), settings.MAX_LIMIT)
-
-    async def maker() -> Dict[str, Any]:
-        # /suggestion is the authoritative catalog source and may raise (→ 5xx);
-        # the JioSaavn enrichment is best-effort. Run them together.
-        suggestion, js_results = await asyncio.gather(
-            _get_json(
-                f"{settings.LYRICA_URL}/suggestion", {"q": term, "limit": limit}
-            ),
-            _search_jiosaavn(term),
-        )
-        raw_results: List[Dict[str, str]] = suggestion.get("results") or []
-        matched = _match_jiosaavn(raw_results, js_results)
-        results = [
-            _to_search_song(
-                item.get("artist", ""),
-                item.get("title", ""),
-                matched.get(f"{item.get('artist')}|{item.get('title')}"),
-            )
-            for item in raw_results
-        ]
-        return {"query": term, "count": len(results), "results": results, "source": "lyrica"}
-
-    return await _cached("search", f"{term}|{limit}", settings.SEARCH_CACHE_TTL, maker)
+    return await search_jiosaavn_tracks(query, limit)
 
 
 async def get_trending(limit: Optional[int] = None) -> Dict[str, Any]:
