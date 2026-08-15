@@ -1,0 +1,19 @@
+diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
+index e2c1f05..6521f59 100644
+--- a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
++++ b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
+@@ -127,7 +127,13 @@ public class MediaSessionService extends Service {
+                     PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
+                 )
+             )
+-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
++            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
++            // Android 16 "Promoted Ongoing" (Live Updates): asks the OS to lift
++            // this ongoing media notification into the status-bar chip / capsule
++            // (e.g. OnePlus Fluid Cloud). Requires POST_PROMOTED_NOTIFICATIONS in
++            // the manifest; no-ops below Android 16. Ongoing is a prerequisite.
++            .setOngoing(true)
++            .setRequestPromotedOngoing(true);
+ 
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+             startForeground(NOTIFICATION_ID, notificationBuilder.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);

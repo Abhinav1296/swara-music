@@ -42,4 +42,11 @@
          actually show. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Android 16 "Promoted Ongoing" (Live Updates): lets the OS lift our ongoing
+         media notification into the status-bar chip / capsule (e.g. OnePlus Fluid
+         Cloud). Paired with setRequestPromotedOngoing(true) in the media-session
+         plugin (see patches/@capgo+capacitor-media-session+*.patch). No effect
+         below Android 16. -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
 </manifest>
