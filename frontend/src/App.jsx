@@ -5,6 +5,7 @@ import { LibraryProvider } from "./context/LibraryContext";
 import { PlaylistProvider } from "./context/PlaylistContext";
 import { RouterProvider, useRouter } from "./context/RouterContext";
 import { OfflineProvider } from "./context/OfflineContext";
+import { LocalSongsProvider } from "./context/LocalSongsContext";
 import { PlayerProvider } from "./context/PlayerContext";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
@@ -98,9 +99,11 @@ export default function App() {
           <PlaylistProvider>
             <RouterProvider>
               <OfflineProvider>
-                <PlayerProvider>
-                  <Shell />
-                </PlayerProvider>
+                <LocalSongsProvider>
+                  <PlayerProvider>
+                    <Shell />
+                  </PlayerProvider>
+                </LocalSongsProvider>
               </OfflineProvider>
             </RouterProvider>
           </PlaylistProvider>

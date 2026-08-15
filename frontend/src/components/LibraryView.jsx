@@ -10,6 +10,7 @@ import SongCard from "./SongCard";
 import PlaylistModal from "./PlaylistModal";
 import PlaylistStrip from "./PlaylistStrip";
 import AddToPlaylistSheet from "./AddToPlaylistSheet";
+import LocalFilesSection from "./LocalFilesSection";
 
 const GRID =
   "grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6";
@@ -181,6 +182,9 @@ export default function LibraryView() {
           ))}
         </div>
       )}
+
+      {/* Local Files — import & play your own device audio (native/APK only) */}
+      <LocalFilesSection />
 
       {/* Recently Played */}
       {recentlyPlayed.length > 0 && (

@@ -28,4 +28,5 @@ export const STORAGE_KEYS = {
   playlistUsage: "swara:playlistUsage", // { [id]: { count, lastUsedAt } } — local-only, per-device
   queue: "swara:queue", // { current, upcoming, played, progress }
   downloads: "swara:downloads", // { [id]: DownloadRecord } — native offline audio+lyrics (APK only)
+  localSongs: "swara:local_songs", // { [id]: LocalSong } — user's own imported device audio (APK only)
 };
