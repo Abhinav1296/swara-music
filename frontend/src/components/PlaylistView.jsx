@@ -5,6 +5,7 @@ import {
   Check,
   ChevronLeft,
   Download,
+  GripVertical,
   ListMusic,
   Loader2,
   MoreVertical,
@@ -17,7 +18,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, Reorder, useDragControls } from "framer-motion";
 import { usePlayer } from "../context/PlayerContext";
 import { usePlaylists } from "../context/PlaylistContext";
 import { useOffline } from "../context/OfflineContext";
@@ -27,15 +28,63 @@ import TrackRow from "./TrackRow";
 import PlaylistModal from "./PlaylistModal";
 
 /**
+ * One draggable row in the rearrange list. Drag is initiated ONLY from the grip
+ * handle (dragListener={false} + dragControls) so the page still scrolls when
+ * you touch the rest of the row. The handle is `touch-none` so a press on it
+ * starts a drag instead of scrolling.
+ */
+function ReorderRow({ song }) {
+  const controls = useDragControls();
+  return (
+    <Reorder.Item
+      value={song}
+      dragListener={false}
+      dragControls={controls}
+      whileDrag={{ scale: 1.02, boxShadow: "0 12px 30px rgba(0,0,0,0.45)" }}
+      className="mb-2 flex items-center gap-3 rounded-xl bg-white/5 p-2.5 ring-1 ring-white/10"
+    >
+      <button
+        type="button"
+        onPointerDown={(e) => controls.start(e)}
+        aria-label="Drag to reorder"
+        className="flex h-10 w-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg text-white/40 transition hover:text-white active:cursor-grabbing"
+      >
+        <GripVertical size={18} />
+      </button>
+      <img
+        src={song.artworkUrl100}
+        alt=""
+        className="h-11 w-11 shrink-0 rounded-md object-cover"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-white" title={song.trackName}>
+          {song.trackName}
+        </p>
+        <p className="truncate text-xs text-white/50" title={song.artistName}>
+          {song.artistName}
+        </p>
+      </div>
+    </Reorder.Item>
+  );
+}
+
+/**
  * Custom playlist detail page. Reads the id from the router (so it deep-links
  * via /playlist?id=…), renders a frosted header with Play All / Shuffle, and a
- * track list. Rename / delete live in a kebab menu with a confirm step.
+ * track list. Rename / delete / rearrange live in a kebab menu.
  */
 export default function PlaylistView() {
   const { route, navigate } = useRouter();
   const { current, isPlaying, play, shuffle, toggleShuffle } = usePlayer();
-  const { getPlaylist, renamePlaylist, deletePlaylist, setPlaylistCover, playlistNameExists, notePlaylistUsed } =
-    usePlaylists();
+  const {
+    getPlaylist,
+    renamePlaylist,
+    deletePlaylist,
+    setPlaylistCover,
+    reorderPlaylist,
+    playlistNameExists,
+    notePlaylistUsed,
+  } = usePlaylists();
   const { capable: offlineCapable, downloads, statusOf, downloadMany } = useOffline();
 
   const id = route.params.id;
@@ -46,6 +95,9 @@ export default function PlaylistView() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [query, setQuery] = useState("");
+  // Rearrange mode: `draft` holds the working order; committed on "Done".
+  const [reorderMode, setReorderMode] = useState(false);
+  const [draft, setDraft] = useState([]);
   const [savingCover, setSavingCover] = useState(false);
   const kebabRef = useRef(null);
   const coverRef = useRef(null);
@@ -67,6 +119,13 @@ export default function PlaylistView() {
 
   // Keep the resolved name in sync (deep links may supply a name param).
   const name = playlist?.name || route.params.name || "Playlist";
+
+  // Leaving/switching playlists drops any in-progress rearrange (draft is for
+  // THIS playlist) and clears the in-playlist search.
+  useEffect(() => {
+    setReorderMode(false);
+    setQuery("");
+  }, [id]);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -144,6 +203,18 @@ export default function PlaylistView() {
   const handleDelete = () => {
     deletePlaylist(id);
     navigate("library");
+  };
+
+  const startReorder = () => {
+    setMenuOpen(false);
+    setQuery("");
+    setDraft(songs);
+    setReorderMode(true);
+  };
+
+  const saveReorder = () => {
+    reorderPlaylist(id, draft);
+    setReorderMode(false);
   };
 
   return (
@@ -288,6 +359,36 @@ export default function PlaylistView() {
             <span className="text-white/50">Add to Playlist</span> to start building it.
           </p>
         </div>
+      ) : reorderMode ? (
+        <div>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm text-white/60">
+              <GripVertical size={16} className="text-white/40" />
+              <span>Drag to reorder</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setReorderMode(false)}
+                className="rounded-full px-4 py-2 text-sm font-medium text-white/60 transition hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveReorder}
+                className="btn-glossy inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+              >
+                <Check size={16} /> Done
+              </button>
+            </div>
+          </div>
+          <Reorder.Group axis="y" values={draft} onReorder={setDraft} className="pb-2">
+            {draft.map((song) => (
+              <ReorderRow key={song.id} song={song} />
+            ))}
+          </Reorder.Group>
+        </div>
       ) : (
         <>
           {/* Search within this playlist (client-side filter of its songs). */}
@@ -358,6 +459,15 @@ export default function PlaylistView() {
                 >
                   <Pencil size={16} className="text-white/60" /> Rename
                 </button>
+                {songs.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={startReorder}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                  >
+                    <GripVertical size={16} className="text-white/60" /> Rearrange
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {

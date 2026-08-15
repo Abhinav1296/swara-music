@@ -55,21 +55,63 @@ function SwipeToAdd({ song, list, onSwipe }) {
   );
 }
 
-/** Local library: liked songs (playlist) + custom playlists + recently played. */
+/**
+ * A square scroll-row tile shared by the top quick-access strip: playlists and
+ * the Liked Songs collection use the same shape (cover + in-place play button +
+ * title/subtitle). `onOpen` fires on a body tap; the round button plays without
+ * navigating.
+ */
+function Tile({ onOpen, cover, title, subtitle, playing, canPlay, onPlay, playLabel }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group w-32 shrink-0 snap-start text-left sm:w-36"
+    >
+      <div className="relative aspect-square overflow-hidden rounded-2xl bg-gradient-to-br from-white/15 to-white/5 ring-1 ring-white/10 shadow-glow">
+        {cover}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+        <button
+          type="button"
+          disabled={!canPlay}
+          onClick={(e) => {
+            e.stopPropagation();
+            onPlay();
+          }}
+          aria-label={playLabel}
+          className="btn-glossy absolute bottom-2 right-2 flex h-10 w-10 items-center justify-center rounded-full text-white shadow-lg transition hover:opacity-90 disabled:opacity-0"
+        >
+          {playing ? (
+            <Pause size={16} fill="white" />
+          ) : (
+            <Play size={16} fill="white" className="ml-0.5" />
+          )}
+        </button>
+      </div>
+      <p className="mt-2 truncate px-0.5 text-sm font-semibold text-white" title={title}>
+        {title}
+      </p>
+      <p className="truncate px-0.5 text-xs text-white/50">{subtitle}</p>
+    </button>
+  );
+}
+
+/** Local library: a usage-ranked quick strip (playlists + Liked Songs) over the
+ * full "Your Playlists" section, the liked-songs grid, downloads, local files
+ * and recently played. */
 export default function LibraryView() {
   const { likedSongs, recentlyPlayed, clearRecent } = useLibrary();
-  const { playlists, createPlaylist, playlistNameExists, notePlaylistUsed } = usePlaylists();
+  const { playlists, playlistsByUsage, createPlaylist, playlistNameExists, notePlaylistUsed } =
+    usePlaylists();
   const { current, isPlaying, play, toggle } = usePlayer();
   const { navigate } = useRouter();
   const { requireAuth } = useAuthGate();
   const [createOpen, setCreateOpen] = useState(false);
   const [sheetSong, setSheetSong] = useState(null);
 
-  const likedPlaying =
-    likedSongs.length > 0 &&
-    current &&
-    likedSongs.some((s) => s.id === current.id) &&
-    isPlaying;
+  const likedIsCurrent =
+    likedSongs.length > 0 && current && likedSongs.some((s) => s.id === current.id);
+  const likedPlaying = likedIsCurrent && isPlaying;
 
   const handleCreate = (name) => {
     const id = createPlaylist(name);
@@ -77,59 +119,78 @@ export default function LibraryView() {
     navigate("playlist", { id, name });
   };
 
+  const goToLikedList = () =>
+    document
+      .getElementById("liked-songs")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+
   return (
     <div className="pt-2">
-      {/* Liked Songs hero */}
-      <div className="glass relative mb-8 flex items-center gap-5 overflow-hidden rounded-3xl p-5 md:gap-7 md:p-8">
-        <div className="pointer-events-none absolute -right-16 -top-16 h-60 w-60 rounded-full bg-accent/30 blur-3xl" />
-        <div className="relative flex h-28 w-28 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-white/15 to-white/5 shadow-glow md:h-36 md:w-36">
-          <Heart size={44} className="text-white" fill="white" />
-        </div>
-        <div className="relative min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-widest text-white/50">Playlist</p>
-          <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-white md:text-4xl">
-            Liked Songs
-          </h1>
-          <p className="mt-1 text-sm text-white/60">{likedSongs.length} songs</p>
-          <button
-            type="button"
-            disabled={likedSongs.length === 0}
-            onClick={() => play(likedSongs[0], likedSongs)}
-            className="mt-4 inline-flex items-center gap-2 btn-glossy rounded-full px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30"
-          >
-            <Play size={18} fill="white" />
-            {likedPlaying ? "Pause" : "Play"}
-          </button>
-        </div>
-      </div>
+      {/* Quick-access strip — most-used playlists first, then Liked Songs.
+          Liked Songs only appears once you've liked at least one track. */}
+      {(playlistsByUsage.length > 0 || likedSongs.length > 0) && (
+        <div className="no-scrollbar -mx-4 mb-10 flex snap-x gap-3 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
+          {playlistsByUsage.map((p) => {
+            const songs = p.songs || [];
+            const isThis = current && songs.some((s) => s.id === current.id);
+            const playingThis = isThis && isPlaying;
+            return (
+              <Tile
+                key={p.id}
+                onOpen={() => navigate("playlist", { id: p.id, name: p.name })}
+                cover={
+                  p.cover ? (
+                    <img src={p.cover} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <Music2 size={38} className="text-white/90" />
+                    </div>
+                  )
+                }
+                title={p.name}
+                subtitle={`${songs.length} ${songs.length === 1 ? "song" : "songs"}`}
+                playing={playingThis}
+                canPlay={songs.length > 0}
+                onPlay={() => {
+                  if (isThis) {
+                    toggle();
+                  } else {
+                    notePlaylistUsed(p.id);
+                    play(songs[0], songs);
+                  }
+                }}
+                playLabel={playingThis ? `Pause ${p.name}` : `Play ${p.name}`}
+              />
+            );
+          })}
 
-      {/* Liked Songs grid */}
-      <h2 className="mb-4 text-xl font-bold text-white">Liked Songs</h2>
-      {likedSongs.length === 0 ? (
-        <div className="glass flex flex-col items-center gap-3 rounded-2xl py-16 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/5">
-            <Heart size={24} className="text-white/40" />
-          </div>
-          <p className="text-white/70">No liked songs yet.</p>
-          <p className="max-w-xs text-sm text-white/30">
-            Tap the heart on any song to save it here. Your likes are stored on this device.
-          </p>
-        </div>
-      ) : (
-        <div className={GRID}>
-          {likedSongs.map((song) => (
-            <SwipeToAdd
-              key={song.id}
-              song={song}
-              list={likedSongs}
-              onSwipe={setSheetSong}
+          {likedSongs.length > 0 && (
+            <Tile
+              onOpen={goToLikedList}
+              cover={
+                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-accent/50 to-accent/10">
+                  <Heart size={40} className="text-white" fill="white" />
+                </div>
+              }
+              title="Liked Songs"
+              subtitle={`${likedSongs.length} ${likedSongs.length === 1 ? "song" : "songs"}`}
+              playing={likedPlaying}
+              canPlay
+              onPlay={() => {
+                if (likedIsCurrent) {
+                  toggle();
+                } else {
+                  play(likedSongs[0], likedSongs);
+                }
+              }}
+              playLabel={likedPlaying ? "Pause Liked Songs" : "Play Liked Songs"}
             />
-          ))}
+          )}
         </div>
       )}
 
       {/* Your Playlists */}
-      <div className="mb-4 mt-10 flex items-center justify-between">
+      <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xl font-bold text-white">Your Playlists</h2>
         <button
           type="button"
@@ -152,60 +213,56 @@ export default function LibraryView() {
           </p>
         </div>
       ) : (
-        // Side-scrolling row (same tile + in-place play as the old "Jump back in").
+        // Side-scrolling row (same tile + in-place play as the top strip).
         <div className="no-scrollbar -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
           {playlists.map((p) => {
             const songs = p.songs || [];
             const isThis = current && songs.some((s) => s.id === current.id);
             const playingThis = isThis && isPlaying;
             return (
-              <button
+              <Tile
                 key={p.id}
-                type="button"
-                onClick={() => navigate("playlist", { id: p.id, name: p.name })}
-                className="group w-32 shrink-0 snap-start text-left sm:w-36"
-              >
-                <div className="relative aspect-square overflow-hidden rounded-2xl bg-gradient-to-br from-white/15 to-white/5 ring-1 ring-white/10 shadow-glow">
-                  {p.cover ? (
+                onOpen={() => navigate("playlist", { id: p.id, name: p.name })}
+                cover={
+                  p.cover ? (
                     <img src={p.cover} alt="" className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center">
                       <Music2 size={38} className="text-white/90" />
                     </div>
-                  )}
-                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-                  <button
-                    type="button"
-                    disabled={songs.length === 0}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (playingThis || isThis) {
-                        toggle();
-                      } else {
-                        notePlaylistUsed(p.id);
-                        play(songs[0], songs);
-                      }
-                    }}
-                    aria-label={playingThis ? `Pause ${p.name}` : `Play ${p.name}`}
-                    className="btn-glossy absolute bottom-2 right-2 flex h-10 w-10 items-center justify-center rounded-full text-white shadow-lg transition hover:opacity-90 disabled:opacity-0"
-                  >
-                    {playingThis ? (
-                      <Pause size={16} fill="white" />
-                    ) : (
-                      <Play size={16} fill="white" className="ml-0.5" />
-                    )}
-                  </button>
-                </div>
-                <p className="mt-2 truncate px-0.5 text-sm font-semibold text-white" title={p.name}>
-                  {p.name}
-                </p>
-                <p className="truncate px-0.5 text-xs text-white/50">
-                  {songs.length} {songs.length === 1 ? "song" : "songs"}
-                </p>
-              </button>
+                  )
+                }
+                title={p.name}
+                subtitle={`${songs.length} ${songs.length === 1 ? "song" : "songs"}`}
+                playing={playingThis}
+                canPlay={songs.length > 0}
+                onPlay={() => {
+                  if (isThis) {
+                    toggle();
+                  } else {
+                    notePlaylistUsed(p.id);
+                    play(songs[0], songs);
+                  }
+                }}
+                playLabel={playingThis ? `Pause ${p.name}` : `Play ${p.name}`}
+              />
             );
           })}
         </div>
+      )}
+
+      {/* Liked Songs — only shown once there's something liked. */}
+      {likedSongs.length > 0 && (
+        <>
+          <h2 id="liked-songs" className="mb-4 mt-10 scroll-mt-24 text-xl font-bold text-white">
+            Liked Songs
+          </h2>
+          <div className={GRID}>
+            {likedSongs.map((song) => (
+              <SwipeToAdd key={song.id} song={song} list={likedSongs} onSwipe={setSheetSong} />
+            ))}
+          </div>
+        </>
       )}
 
       {/* Downloads — songs saved for offline playback (native/APK only) */}

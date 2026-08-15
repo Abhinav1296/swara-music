@@ -63,7 +63,7 @@ export default function Section({ title, fetchKey, songs: provided, onSeeAll, on
 
   return (
     <section className="mb-8">
-      <div className="mb-3 flex items-end justify-between px-1">
+      <div className="mb-3 flex items-end justify-between">
         <h2 className="text-xl font-bold tracking-tight text-white">{title}</h2>
         <div className="flex items-center gap-2">
           {onSeeAll && (
@@ -96,7 +96,7 @@ export default function Section({ title, fetchKey, songs: provided, onSeeAll, on
 
       <div
         ref={scrollerRef}
-        className="no-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth pb-2"
+        className="no-scrollbar -mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-4 pb-2 md:mx-0 md:px-0"
       >
         {loading
           ? Array.from({ length: 8 }).map((_, i) => (

@@ -251,6 +251,39 @@ export function PlaylistProvider({ children }) {
     );
   }, []);
 
+  /**
+   * Replace a playlist's song ORDER. `orderedSongs` should be a permutation of
+   * the current songs; we rebuild the list from the current songs in the given
+   * order, append any the caller left out, and ignore ids that aren't in the
+   * playlist — so a stale drag can never drop, duplicate, or inject a track. If
+   * the order is unchanged the reference is kept (no needless write-through).
+   */
+  const reorderPlaylist = useCallback((id, orderedSongs) => {
+    setPlaylists((prev) =>
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const cur = p.songs || [];
+        const byId = new Map(cur.map((s) => [s.id, s]));
+        const next = [];
+        const seen = new Set();
+        for (const s of orderedSongs || []) {
+          const match = s && byId.get(s.id);
+          if (match && !seen.has(match.id)) {
+            next.push(match);
+            seen.add(match.id);
+          }
+        }
+        for (const s of cur) {
+          if (!seen.has(s.id)) next.push(s);
+        }
+        if (next.length === cur.length && next.every((s, i) => s.id === cur[i].id)) {
+          return p;
+        }
+        return { ...p, songs: next };
+      })
+    );
+  }, []);
+
   const getPlaylist = useCallback(
     (id) => playlists.find((p) => p.id === id) || null,
     [playlists]
@@ -287,6 +320,7 @@ export function PlaylistProvider({ children }) {
     setPlaylistCover,
     addToPlaylist,
     removeFromPlaylist,
+    reorderPlaylist,
     notePlaylistUsed,
     getPlaylist,
     isInPlaylist,

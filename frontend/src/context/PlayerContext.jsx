@@ -758,7 +758,12 @@ export function PlayerProvider({ children }) {
   const goNextRef = useRef(null);
   goNextRef.current = goNext;
 
-  /** Go back (restart current if >3s in, else previous track). */
+  /**
+   * Go back. Within the first 10s of the track, "back" means the PREVIOUS song
+   * (and repeated presses walk back through history, since each track loads at
+   * 0s). Once you're 10s+ in, "back" restarts the current song from the start —
+   * the familiar player convention.
+   */
   const goPrev = useCallback(() => {
     // Read freshest queue; re-sync synchronously below on mutation (see goNext).
     const st = transportRef.current;
@@ -767,7 +772,7 @@ export function PlayerProvider({ children }) {
     if (!current) return;
     wantPlayRef.current = true;
 
-    if (audio && audio.currentTime > 3) {
+    if (audio && audio.currentTime >= 10) {
       audio.currentTime = 0;
       setProgress(0);
       return;

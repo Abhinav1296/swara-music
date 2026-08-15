@@ -74,7 +74,7 @@ function Shell() {
             used to provide (keeps it clear of the status bar / notch). */}
         {route.name === "search" && <TopBar onSearch={handleSearch} />}
         <main
-          className={`flex-1 overflow-y-auto px-4 pb-[calc(11rem_+_env(safe-area-inset-bottom))] md:px-6 md:pb-40 ${
+          className={`no-scrollbar flex-1 overflow-y-auto px-4 pb-[calc(11rem_+_env(safe-area-inset-bottom))] md:px-6 md:pb-40 ${
             route.name === "search"
               ? "pt-2"
               : "pt-[calc(0.5rem_+_env(safe-area-inset-top))]"

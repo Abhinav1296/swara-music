@@ -17,13 +17,18 @@ const GRID =
  * "Load more" pages through the ~5k albums instead of dumping them all at once.
  */
 export default function AlbumsView() {
+  const online = useOnlineStatus();
   const [albums, setAlbums] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
 
+  // Refetches when connectivity returns. A failure (offline OR an unreachable
+  // backend, which navigator.onLine can't see) leaves `error` set and the page
+  // yields to the OfflineNotice below.
   useEffect(() => {
+    if (!online) return undefined;
     let active = true;
     setLoading(true);
     setError(null);
@@ -38,7 +43,7 @@ export default function AlbumsView() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [online]);
 
   const loadMore = useCallback(() => {
     setLoadingMore(true);
@@ -55,10 +60,10 @@ export default function AlbumsView() {
 
   const hasMore = albums.length < total;
 
-  // Albums is a live grid from the backend; offline there's nothing to fetch, so
-  // send the user to their offline Downloads / Local Files.
-  const online = useOnlineStatus();
-  if (!online) return <OfflineNotice />;
+  // Albums is a live grid from the backend; with no connection — or a backend we
+  // can't reach — there's nothing to fetch, so send the user to their offline
+  // Downloads / Local Files instead.
+  if (!online || (!loading && error && albums.length === 0)) return <OfflineNotice />;
 
   return (
     <div className="pt-2">
@@ -75,12 +80,7 @@ export default function AlbumsView() {
         </div>
       </div>
 
-      {error ? (
-        <div className="glass rounded-2xl p-8 text-center">
-          <p className="font-medium text-white/80">Couldn’t load albums.</p>
-          <p className="mt-1 text-sm text-white/40">{error}</p>
-        </div>
-      ) : loading ? (
+      {loading ? (
         <div className={GRID}>
           {Array.from({ length: 18 }).map((_, i) => (
             <SkeletonCard key={i} />

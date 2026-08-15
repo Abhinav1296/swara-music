@@ -18,10 +18,13 @@ export default function Marquee({ children, className = "", gap = 40, speed = 40
 
   useLayoutEffect(() => {
     const box = boxRef.current;
-    const text = textRef.current;
-    if (!box || !text) return;
+    if (!box) return;
 
     const measure = () => {
+      // Read the text node fresh each time: after we flip to the sliding branch
+      // textRef points at the track's first copy, not the static fallback span.
+      const text = textRef.current;
+      if (!text) return;
       const textW = text.scrollWidth;
       const boxW = box.clientWidth;
       const overflow = textW > boxW + 1;
@@ -34,10 +37,20 @@ export default function Marquee({ children, className = "", gap = 40, speed = 40
     };
 
     measure();
+    // The webfont often loads AFTER first paint and makes the text wider — the
+    // box width never changes, so ResizeObserver alone would miss it. Re-check
+    // on the next frame and once fonts are ready.
+    const raf = requestAnimationFrame(measure);
+    if (typeof document !== "undefined" && document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(measure).catch(() => {});
+    }
     // Re-measure when the box resizes (rotation, orientation, sidebar open…).
     const ro = new ResizeObserver(measure);
     ro.observe(box);
-    return () => ro.disconnect();
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   }, [children, gap, speed]);
 
   return (

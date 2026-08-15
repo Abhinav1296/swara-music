@@ -65,15 +65,20 @@ function greeting() {
 export default function HomeView() {
   const { current, isPlaying, play } = usePlayer();
   const { navigate } = useRouter();
+  const online = useOnlineStatus();
 
   const [trending, setTrending] = useState([]);
   const [shelfSongs, setShelfSongs] = useState([]); // accumulated tracks from mood shelves
   const [newReleases, setNewReleases] = useState([]); // fresh Telugu album cards
+  const [failed, setFailed] = useState(false); // primary feed (trending) couldn't load
   // Track ids already shown on Home so the recommendations shelf can dedupe.
   const displayedIdsRef = useRef(new Set());
 
-  // Trending powers both hero and the first shelf
+  // Trending powers both hero and the first shelf. Refetches when connectivity
+  // returns; a failure (offline OR an unreachable backend, which navigator.onLine
+  // can't see) flips `failed` so the whole page yields to the OfflineNotice.
   useEffect(() => {
+    if (!online) return undefined;
     let active = true;
     getTrending(20)
       .then((d) => {
@@ -81,19 +86,25 @@ export default function HomeView() {
         const results = d?.results || [];
         setTrending(results);
         results.forEach((t) => t?.id && displayedIdsRef.current.add(t.id));
+        setFailed(false);
       })
-      .catch(() => active && setTrending([]));
+      .catch(() => {
+        if (!active) return;
+        setTrending([]);
+        setFailed(true);
+      });
     return () => { active = false; };
-  }, []);
+  }, [online]);
 
   // New Releases: real fresh Telugu albums (cards), live from JioSaavn.
   useEffect(() => {
+    if (!online) return undefined;
     let active = true;
     getNewReleases({ limit: 20 })
       .then((d) => active && setNewReleases(d?.results || []))
       .catch(() => active && setNewReleases([]));
     return () => { active = false; };
-  }, []);
+  }, [online]);
 
   // Stable callback for Section to report its fetched songs (avoids refetch loops)
   const addTracks = useCallback((tracks) => {
@@ -204,10 +215,9 @@ export default function HomeView() {
   const featuredPlaying = featured && current?.id === featured.id && isPlaying;
 
   // Home is entirely network-fed (trending, new releases, shelves); with no
-  // connection there's nothing to show, so point the user to their offline
-  // Downloads / Local Files instead.
-  const online = useOnlineStatus();
-  if (!online) return <OfflineNotice />;
+  // connection — or a backend we can't reach — there's nothing to show, so point
+  // the user to their offline Downloads / Local Files instead.
+  if (!online || (failed && trending.length === 0)) return <OfflineNotice />;
 
   return (
     <div className="pt-2">
@@ -255,7 +265,7 @@ export default function HomeView() {
               alt={featured.trackName}
               className="h-44 w-44 shrink-0 rounded-2xl object-cover shadow-2xl ring-1 ring-white/15 md:h-56 md:w-56"
             />
-            <div className="min-w-0 flex-1 text-center md:text-left">
+            <div className="w-full min-w-0 flex-1 text-center md:text-left">
               <p className="text-xs font-semibold uppercase tracking-widest text-accent">
                 Featured today
               </p>
@@ -297,7 +307,7 @@ export default function HomeView() {
       )}
 
       {/* Quick mood chips */}
-      <div className="no-scrollbar mb-9 flex gap-2.5 overflow-x-auto pb-1">
+      <div className="no-scrollbar -mx-4 mb-9 flex gap-2.5 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
         {MOOD_CHIPS.map((c) => (
           <button
             key={c.query}
@@ -322,10 +332,10 @@ export default function HomeView() {
       {/* New Releases — real fresh Telugu albums (cards → album detail) */}
       {newReleases.length > 0 && (
         <section className="mb-8">
-          <div className="mb-3 px-1">
+          <div className="mb-3">
             <h2 className="text-xl font-bold tracking-tight text-white">New Releases</h2>
           </div>
-          <div className="no-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth pb-2">
+          <div className="no-scrollbar -mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth px-4 pb-2 md:mx-0 md:px-0">
             {newReleases.map((a) => (
               <div key={a.key || a.albumId} className="w-36 shrink-0 snap-start sm:w-40">
                 <AlbumCard album={a} />
@@ -351,10 +361,10 @@ export default function HomeView() {
 
       {/* Popular Artists (derived from shelves) */}
       <section className="mb-8">
-        <div className="mb-3 px-1">
+        <div className="mb-3">
           <h2 className="text-xl font-bold tracking-tight text-white">Popular Artists</h2>
         </div>
-        <div className="no-scrollbar flex snap-x gap-4 overflow-x-auto scroll-smooth pb-2">
+        <div className="no-scrollbar -mx-4 flex snap-x gap-4 overflow-x-auto scroll-smooth px-4 pb-2 md:mx-0 md:px-0">
           {derivedArtists.length === 0
             ? Array.from({ length: 6 }).map((_, i) => (
                 <div key={i} className="flex w-40 shrink-0 flex-col items-center gap-3">
