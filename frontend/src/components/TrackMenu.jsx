@@ -4,17 +4,21 @@ import {
   Check,
   ChevronLeft,
   Disc3,
+  Download,
   Heart,
   ListMusic,
+  Loader2,
   Mic2,
   MoreHorizontal,
   Plus,
   PlayCircle,
+  Trash2,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { usePlayer } from "../context/PlayerContext";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlaylists } from "../context/PlaylistContext";
+import { useOffline } from "../context/OfflineContext";
 import { useRouter } from "../context/RouterContext";
 import { useAuthGate } from "../context/AuthGate";
 import PlaylistModal from "./PlaylistModal";
@@ -39,6 +43,7 @@ export default function TrackMenu({ song, triggerClassName, iconSize = 18, eleva
   const { isLiked, toggleLike } = useLibrary();
   const { playlists, createPlaylist, addToPlaylist, isInPlaylist, playlistNameExists } =
     usePlaylists();
+  const { capable: offlineCapable, isDownloaded, statusOf, download, remove } = useOffline();
   const { navigate } = useRouter();
   const { requireAuth } = useAuthGate();
 
@@ -80,6 +85,32 @@ export default function TrackMenu({ song, triggerClassName, iconSize = 18, eleva
   if (!song) return null;
   const liked = isLiked(song.id);
 
+  // Offline download — native (APK) only. Reflects live status: idle → downloading
+  // (spinner, disabled) → downloaded (offer Remove). Error auto-resets to idle.
+  const dlStatus = statusOf(song.id);
+  const downloaded = isDownloaded(song.id);
+  const downloadItem = !offlineCapable
+    ? null
+    : dlStatus === "downloading"
+      ? {
+          label: "Downloading…",
+          icon: Loader2,
+          iconClassName: "animate-spin text-accent",
+          disabled: true,
+          onClick: () => {},
+        }
+      : downloaded
+        ? {
+            label: "Remove Download",
+            icon: Trash2,
+            onClick: () => { remove(song.id); },
+          }
+        : {
+            label: dlStatus === "error" ? "Retry Download" : "Download",
+            icon: Download,
+            onClick: () => { download(song); },
+          };
+
   const baseItems = [
     { label: "Play Next", icon: PlayCircle, onClick: () => { playNext(song); setOpen(false); } },
     { label: "Add to Queue", icon: ListMusic, onClick: () => { addToQueue(song); setOpen(false); } },
@@ -93,6 +124,7 @@ export default function TrackMenu({ song, triggerClassName, iconSize = 18, eleva
       icon: Heart,
       onClick: () => { toggleLike(song); setOpen(false); },
     },
+    ...(downloadItem ? [downloadItem] : []),
     ...(song.collectionName
       ? [
           {
@@ -176,9 +208,10 @@ export default function TrackMenu({ song, triggerClassName, iconSize = 18, eleva
                         key={it.label}
                         type="button"
                         onClick={it.onClick}
-                        className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
+                        disabled={it.disabled}
+                        className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white disabled:cursor-default disabled:opacity-70 disabled:hover:bg-transparent disabled:hover:text-white/80"
                       >
-                        <it.icon size={16} className="text-white/60" />
+                        <it.icon size={16} className={it.iconClassName || "text-white/60"} />
                         {it.label}
                       </button>
                     ))}

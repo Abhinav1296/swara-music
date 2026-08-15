@@ -4,6 +4,7 @@ import { AuthGateProvider } from "./context/AuthGate";
 import { LibraryProvider } from "./context/LibraryContext";
 import { PlaylistProvider } from "./context/PlaylistContext";
 import { RouterProvider, useRouter } from "./context/RouterContext";
+import { OfflineProvider } from "./context/OfflineContext";
 import { PlayerProvider } from "./context/PlayerContext";
 import Sidebar from "./components/Sidebar";
 import TopBar from "./components/TopBar";
@@ -96,9 +97,11 @@ export default function App() {
         <LibraryProvider>
           <PlaylistProvider>
             <RouterProvider>
-              <PlayerProvider>
-                <Shell />
-              </PlayerProvider>
+              <OfflineProvider>
+                <PlayerProvider>
+                  <Shell />
+                </PlayerProvider>
+              </OfflineProvider>
             </RouterProvider>
           </PlaylistProvider>
         </LibraryProvider>

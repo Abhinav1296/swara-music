@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Camera,
+  Check,
   ChevronLeft,
+  Download,
   ListMusic,
   Loader2,
   MoreVertical,
@@ -18,6 +20,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import { usePlayer } from "../context/PlayerContext";
 import { usePlaylists } from "../context/PlaylistContext";
+import { useOffline } from "../context/OfflineContext";
 import { useRouter } from "../context/RouterContext";
 import { fileToSquareDataUrl } from "../utils/image";
 import TrackRow from "./TrackRow";
@@ -33,6 +36,7 @@ export default function PlaylistView() {
   const { current, isPlaying, play, shuffle, toggleShuffle } = usePlayer();
   const { getPlaylist, renamePlaylist, deletePlaylist, setPlaylistCover, playlistNameExists, notePlaylistUsed } =
     usePlaylists();
+  const { capable: offlineCapable, downloads, statusOf, downloadMany } = useOffline();
 
   const id = route.params.id;
   const playlist = getPlaylist(id);
@@ -110,6 +114,15 @@ export default function PlaylistView() {
     : songs;
   const listPlaying =
     songs.length > 0 && current && songs.some((t) => t.id === current.id) && isPlaying;
+
+  // Offline "Download all" (APK only). Reflects how many of this playlist's songs
+  // are already on-device, and whether a batch is currently in flight.
+  const downloadedCount = offlineCapable
+    ? songs.filter((s) => downloads[s.id]).length
+    : 0;
+  const anyDownloading = offlineCapable && songs.some((s) => statusOf(s.id) === "downloading");
+  const allDownloaded = songs.length > 0 && downloadedCount === songs.length;
+  const showDownloadAll = offlineCapable && songs.length > 0;
 
   const openMenu = (e) => {
     e.stopPropagation();
@@ -214,6 +227,35 @@ export default function PlaylistView() {
               >
                 <Shuffle size={18} />
               </button>
+
+              {showDownloadAll && (
+                <button
+                  type="button"
+                  disabled={anyDownloading || allDownloaded}
+                  onClick={() => downloadMany(songs.filter((s) => !downloads[s.id]))}
+                  aria-label={allDownloaded ? "Downloaded" : "Download all"}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium transition disabled:cursor-default ${
+                    allDownloaded
+                      ? "text-accent"
+                      : "text-white/70 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  {anyDownloading ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin text-accent" />
+                      <span className="tabular-nums">{downloadedCount}/{songs.length}</span>
+                    </>
+                  ) : allDownloaded ? (
+                    <>
+                      <Check size={18} /> Downloaded
+                    </>
+                  ) : (
+                    <>
+                      <Download size={18} /> Download
+                    </>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 

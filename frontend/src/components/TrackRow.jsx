@@ -1,5 +1,6 @@
-import { Pause, Play } from "lucide-react";
+import { CircleArrowDown, Pause, Play } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
+import { useOffline } from "../context/OfflineContext";
 import { useRouter } from "../context/RouterContext";
 import LikeButton from "./LikeButton";
 import TrackMenu from "./TrackMenu";
@@ -12,10 +13,12 @@ import { formatTime } from "../utils/format";
  */
 export default function TrackRow({ song, index, list }) {
   const { current, isPlaying, play } = usePlayer();
+  const { isDownloaded } = useOffline();
   const { navigate } = useRouter();
 
   const isActive = current?.id === song.id;
   const isPlayingThis = isActive && isPlaying;
+  const downloaded = isDownloaded(song.id);
   const context = list || [song];
 
   return (
@@ -83,6 +86,14 @@ export default function TrackRow({ song, index, list }) {
           {song.artistName}
         </p>
       </div>
+
+      {downloaded && (
+        <CircleArrowDown
+          size={15}
+          className="shrink-0 text-accent"
+          aria-label="Downloaded"
+        />
+      )}
 
       <span className="hidden shrink-0 text-xs tabular-nums text-white/40 sm:block">
         {formatTime((song.trackTimeMillis || 0) / 1000)}

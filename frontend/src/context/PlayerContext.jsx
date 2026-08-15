@@ -10,6 +10,7 @@ import { loadJSON, saveJSON, STORAGE_KEYS } from "../utils/storage";
 import { useLibrary } from "./LibraryContext";
 import { getRelated, getSongDetails } from "../api/client";
 import { normalizeLyrics, normalizeTrack } from "../utils/trackAdapter";
+import { getDownloadRecord, getPlayableSrc } from "../offline/downloads";
 import { MediaSession } from "@capgo/capacitor-media-session";
 
 /**
@@ -163,6 +164,46 @@ export function PlayerProvider({ children }) {
   // FullScreenPlayer can honor it on open without forcing a re-render.
   const pendingTabRef = useRef(null);
 
+  // Offline-first: if this track has a completed local download (APK only),
+  // play the stored audio file + its snapshot lyrics with NO network round-trip.
+  // Mirrors applyPrefetched's "apply immediately" takeover (cancel any in-flight
+  // resolve, bump the token) so a stale network stream can never clobber it.
+  // Returns true when it took over playback; false to fall through to network.
+  const playLocalIfAvailable = useCallback((track, autoplay) => {
+    const rec = getDownloadRecord(track?.id);
+    if (!rec) return false;
+    const src = getPlayableSrc(rec);
+    if (!src) return false; // not native / missing uri → resolve over network
+
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    resolveTokenRef.current += 1;
+
+    setCurrent({ ...track, id: track.id, streamUrl: src });
+    if (!rec.lyrics || rec.lyrics.kind === "unavailable") {
+      setLyrics(null);
+      setLyricsStatus("unavailable");
+    } else {
+      setLyrics(rec.lyrics);
+      setLyricsStatus("available");
+    }
+    setStreamError(null);
+    setIsResolvingStream(false);
+
+    const audio = audioRef.current;
+    if (audio) {
+      audio.src = src;
+      audio.load();
+      if (autoplay) {
+        audio.play().catch(() => setIsPlaying(false));
+        setIsPlaying(true);
+      } else {
+        setIsPlaying(false);
+      }
+    }
+    return true;
+  }, []);
+
   // Resolve a track's full stream + synced lyrics from /api/song-details.
   // Deduplicates identical in-flight resolves, ignores stale responses when
   // the user skips quickly, aborts the previous resolve on a new one, retries
@@ -170,6 +211,8 @@ export function PlayerProvider({ children }) {
   // exists. Never corrupts the queue on failure.
   const resolveAndPlay = useCallback(async (track, autoplay) => {
     if (!track) return;
+    // A local download always wins over the network.
+    if (playLocalIfAvailable(track, autoplay)) return;
     const key = trackKey(track);
     const existing = inflightRef.current.get(key);
     if (existing) return existing; // reuse identical in-flight resolve
@@ -290,11 +333,14 @@ export function PlayerProvider({ children }) {
       inflightRef.current.delete(key);
     });
     return run;
-  }, []);
+  }, [playLocalIfAvailable]);
 
   // Apply a prefetched track immediately (no network wait). Returns true if a
   // prefetch was found and applied. Cancels any in-flight play resolve first.
   const applyPrefetched = useCallback((track, autoplay) => {
+    // A completed local download beats a network prefetch — let the caller
+    // fall through to resolveAndPlay, which plays the stored file.
+    if (getDownloadRecord(track?.id)) return false;
     const key = trackKey(track);
     const cached = prefetchCacheRef.current.get(key);
     if (!cached) return false;

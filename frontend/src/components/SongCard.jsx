@@ -1,6 +1,7 @@
-import { Pause, Play } from "lucide-react";
+import { CircleArrowDown, Pause, Play } from "lucide-react";
 import { motion } from "framer-motion";
 import { usePlayer } from "../context/PlayerContext";
+import { useOffline } from "../context/OfflineContext";
 import { useRouter } from "../context/RouterContext";
 import LikeButton from "./LikeButton";
 import TrackMenu from "./TrackMenu";
@@ -12,10 +13,12 @@ import TrackMenu from "./TrackMenu";
  */
 export default function SongCard({ song, list }) {
   const { current, isPlaying, play } = usePlayer();
+  const { isDownloaded } = useOffline();
   const { navigate } = useRouter();
 
   const isActive = current?.id === song.id;
   const isPlayingThis = isActive && isPlaying;
+  const downloaded = isDownloaded(song.id);
   const context = list || [song];
 
   const goArtist = (e) => {
@@ -59,6 +62,13 @@ export default function SongCard({ song, list }) {
         <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
           <TrackMenu song={song} />
         </div>
+
+        {/* Downloaded badge (bottom-left) — always visible so shelves are scannable */}
+        {downloaded && (
+          <div className="absolute bottom-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/50 backdrop-blur-md ring-1 ring-white/10">
+            <CircleArrowDown size={14} className="text-accent" aria-label="Downloaded" />
+          </div>
+        )}
 
         {/* Play / pause (bottom-right) */}
         <button
