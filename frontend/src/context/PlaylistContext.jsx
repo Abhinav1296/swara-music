@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -64,12 +65,28 @@ function mergePlaylists(local, server) {
   return Array.from(byId.values());
 }
 
+// Recency-weighted usage score: recent plays count for more, so the strip feels
+// like "made for you" ordering rather than a raw all-time leaderboard. `count`
+// is amplified by an exponential decay on time-since-last-play (~10-day half-
+// life). Never-played playlists score 0 and fall to the back (by createdAt).
+const USAGE_TAU_MS = 14 * 24 * 60 * 60 * 1000; // exp decay constant (~9.7-day half-life)
+function usageScore(u, now) {
+  if (!u || !u.lastUsedAt) return 0;
+  const decay = Math.exp(-(now - u.lastUsedAt) / USAGE_TAU_MS);
+  return ((u.count || 0) + 1) * decay; // +1 so a fresh single play still outranks stale ones
+}
+
 export function PlaylistProvider({ children }) {
   const { token } = useAuth();
   const [playlists, setPlaylists] = useState(() => loadJSON(STORAGE_KEYS.playlists, []));
+  // Per-device play usage { [id]: { count, lastUsedAt } } — powers the Library
+  // "most-used first" strip. Local-only (not account-synced): it reflects how
+  // THIS device is used, and never needs to survive a reinstall.
+  const [usage, setUsage] = useState(() => loadJSON(STORAGE_KEYS.playlistUsage, {}));
 
   // Always mirror to localStorage (offline / logged-out store + instant boot).
   useEffect(() => saveJSON(STORAGE_KEYS.playlists, playlists), [playlists]);
+  useEffect(() => saveJSON(STORAGE_KEYS.playlistUsage, usage), [usage]);
 
   // A live mirror of `playlists` so the create/rename callbacks (which are memo'd
   // with empty deps) can read the current set synchronously — needed to reject a
@@ -197,6 +214,21 @@ export function PlaylistProvider({ children }) {
 
   const deletePlaylist = useCallback((id) => {
     setPlaylists((prev) => prev.filter((p) => p.id !== id));
+    // Drop its usage record too, so a re-created id can't inherit a stale score.
+    setUsage((prev) => {
+      if (!prev[id]) return prev;
+      const { [id]: _drop, ...rest } = prev;
+      return rest;
+    });
+  }, []);
+
+  /** Record a play of a playlist (bumps its usage score; powers the strip). */
+  const notePlaylistUsed = useCallback((id) => {
+    if (!id) return;
+    setUsage((prev) => {
+      const cur = prev[id] || { count: 0, lastUsedAt: 0 };
+      return { ...prev, [id]: { count: cur.count + 1, lastUsedAt: Date.now() } };
+    });
   }, []);
 
   /** Add a song, de-duping by id. No-op if already present. */
@@ -232,8 +264,22 @@ export function PlaylistProvider({ children }) {
     [playlists]
   );
 
+  // Playlists ordered "most-used first" (recency-weighted play count). Ties and
+  // never-played playlists fall back to newest-first. A stable copy — callers
+  // (the Library strip) get a fresh array they can slice without mutating state.
+  const playlistsByUsage = useMemo(() => {
+    const now = Date.now();
+    return [...playlists].sort((a, b) => {
+      const sa = usageScore(usage[a.id], now);
+      const sb = usageScore(usage[b.id], now);
+      if (sb !== sa) return sb - sa;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+  }, [playlists, usage]);
+
   const value = {
     playlists,
+    playlistsByUsage,
     playlistNameExists,
     createPlaylist,
     renamePlaylist,
@@ -241,6 +287,7 @@ export function PlaylistProvider({ children }) {
     setPlaylistCover,
     addToPlaylist,
     removeFromPlaylist,
+    notePlaylistUsed,
     getPlaylist,
     isInPlaylist,
   };

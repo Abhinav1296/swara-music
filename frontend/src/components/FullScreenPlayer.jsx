@@ -134,13 +134,14 @@ export default function FullScreenPlayer() {
     return undefined;
   }, [route, fullscreen, closeFullscreen]);
 
-  // C3 — auto-hide the transport (Apple-style). While a track is PLAYING on the
-  // pure artwork view, the top bar + controls fade after a few seconds of
-  // stillness; any tap brings them back (and restarts the countdown). When
-  // paused or with a lyrics/up-next panel open, controls always stay put.
+  // Auto-hide the transport, Apple-style — but ONLY on the Lyrics / Up-Next
+  // sheet (mobile). The main "Now Playing" artwork view now keeps its controls
+  // permanently on; when a panel is open and a track is playing, the sheet's
+  // transport fades after a few seconds of stillness and any tap on the sheet
+  // brings it back (and restarts the countdown). Paused → controls stay put.
   const [controlsVisible, setControlsVisible] = useState(true);
   const hideTimer = useRef(null);
-  const canAutoHide = fullscreen && isPlaying && rightPanel === "none";
+  const canAutoHide = fullscreen && isPlaying && rightPanel !== "none";
   const revealControls = useCallback(() => {
     setControlsVisible(true);
     if (hideTimer.current) clearTimeout(hideTimer.current);
@@ -155,7 +156,7 @@ export default function FullScreenPlayer() {
     setControlsVisible(true);
     hideTimer.current = setTimeout(() => setControlsVisible(false), 3800);
     return () => hideTimer.current && clearTimeout(hideTimer.current);
-  }, [canAutoHide, current?.id]);
+  }, [canAutoHide, current?.id, rightPanel]);
   const controlsFadeCls = `transition-opacity duration-500 ${
     controlsVisible ? "opacity-100" : "pointer-events-none opacity-0"
   }`;
@@ -419,8 +420,8 @@ export default function FullScreenPlayer() {
             <div className="absolute inset-0 bg-gradient-to-br from-black/30 via-black/55 to-black/80" />
           </div>
 
-          {/* Top bar — fades with the transport controls (C3). */}
-          <div className={`flex items-center justify-between px-4 pb-4 pt-[calc(1rem_+_env(safe-area-inset-top))] md:px-8 md:pb-6 md:pt-[calc(1.5rem_+_env(safe-area-inset-top))] ${controlsFadeCls}`}>
+          {/* Top bar — always on in the main "Now Playing" view. */}
+          <div className="flex items-center justify-between px-4 pb-4 pt-[calc(1rem_+_env(safe-area-inset-top))] md:px-8 md:pb-6 md:pt-[calc(1.5rem_+_env(safe-area-inset-top))]">
             <button
               type="button"
               onClick={closeFullscreen}
@@ -488,10 +489,9 @@ export default function FullScreenPlayer() {
                 <LikeButton song={current} className="h-11 w-11 shrink-0 bg-white/10" size={22} />
               </div>
 
-              {/* Transport cluster — seek / play / volume / panel toggles. This
-                  whole group auto-hides together (C3); the artwork + title above
-                  stay visible so the view never looks empty. */}
-              <div className={`w-full ${controlsFadeCls}`}>
+              {/* Transport cluster — seek / play / volume / panel toggles.
+                  Always on in the main "Now Playing" view. */}
+              <div className="w-full">
               {/* Seek */}
               <div className="mt-6 w-full">
                 <div className="relative">
@@ -720,8 +720,64 @@ export default function FullScreenPlayer() {
                   </button>
                 </div>
 
-                <div className="flex flex-1 flex-col overflow-hidden px-5 pb-8">
+                <div className="flex flex-1 flex-col overflow-hidden px-5">
                   {renderPanel()}
+                </div>
+
+                {/* Auto-hiding transport — the mobile Lyrics / Up-Next sheet
+                    otherwise has no play controls. Apple-style: it fades after a
+                    few seconds of stillness and any tap on the sheet (bubbles to
+                    revealControls above) brings it back. */}
+                <div
+                  className={`shrink-0 px-5 pb-[calc(1rem_+_env(safe-area-inset-bottom))] pt-3 ${controlsFadeCls}`}
+                >
+                  <input
+                    type="range"
+                    min={0}
+                    max={duration || 0}
+                    step={0.1}
+                    value={Math.min(progress, duration || 0)}
+                    onChange={(e) => seek(Number(e.target.value))}
+                    aria-label="Seek"
+                    className="h-1.5 w-full cursor-pointer appearance-none rounded-full"
+                    style={{
+                      background: `linear-gradient(to right, #fa233b ${pct}%, rgba(255,255,255,0.2) ${pct}%)`,
+                    }}
+                  />
+                  <div className="mb-2.5 mt-1.5 flex justify-between text-[11px] tabular-nums text-white/50">
+                    <span>{formatTime(progress)}</span>
+                    <span>{formatTime(duration)}</span>
+                  </div>
+                  <div className="flex items-center justify-center gap-10">
+                    <button
+                      type="button"
+                      onClick={prev}
+                      aria-label="Previous"
+                      className="text-white/85 transition hover:text-white"
+                    >
+                      <SkipBack size={26} fill="currentColor" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggle}
+                      aria-label={isPlaying ? "Pause" : "Play"}
+                      className="btn-glossy flex h-14 w-14 items-center justify-center rounded-full text-white transition hover:scale-105"
+                    >
+                      {isPlaying ? (
+                        <Pause size={26} fill="currentColor" />
+                      ) : (
+                        <Play size={26} fill="currentColor" className="ml-1" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={next}
+                      aria-label="Next"
+                      className="text-white/85 transition hover:text-white"
+                    >
+                      <SkipForward size={26} fill="currentColor" />
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             )}

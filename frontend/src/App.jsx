@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { AuthProvider } from "./context/AuthContext";
+import { AuthGateProvider } from "./context/AuthGate";
 import { LibraryProvider } from "./context/LibraryContext";
 import { PlaylistProvider } from "./context/PlaylistContext";
 import { RouterProvider, useRouter } from "./context/RouterContext";
@@ -91,15 +92,17 @@ function Shell() {
 export default function App() {
   return (
     <AuthProvider>
-      <LibraryProvider>
-        <PlaylistProvider>
-          <RouterProvider>
-            <PlayerProvider>
-              <Shell />
-            </PlayerProvider>
-          </RouterProvider>
-        </PlaylistProvider>
-      </LibraryProvider>
+      <AuthGateProvider>
+        <LibraryProvider>
+          <PlaylistProvider>
+            <RouterProvider>
+              <PlayerProvider>
+                <Shell />
+              </PlayerProvider>
+            </RouterProvider>
+          </PlaylistProvider>
+        </LibraryProvider>
+      </AuthGateProvider>
     </AuthProvider>
   );
 }

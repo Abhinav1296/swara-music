@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Check, Loader2, ThumbsUp, X } from "lucide-react";
 import { getLyricVersions, sendLyricFeedback } from "../api/client";
 import { normalizeVersion } from "../utils/trackAdapter";
+import { useAuthGate } from "../context/AuthGate";
 
 /**
  * Lyrics version picker. Songs in our catalog carry several lyric versions
@@ -20,6 +21,7 @@ import { normalizeVersion } from "../utils/trackAdapter";
  *   onClose       – dismiss
  */
 export default function LyricVersions({ song, currentSource, onUse, onClose }) {
+  const { requireAuth } = useAuthGate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null); // { songId, chosen, versions }
@@ -52,7 +54,7 @@ export default function LyricVersions({ song, currentSource, onUse, onClose }) {
 
   const versions = data?.versions || [];
 
-  const vote = async (v) => {
+  const castVote = async (v) => {
     if (!data?.songId || voting) return;
     setVoting(v.source);
     setVoted(v.source);
@@ -71,6 +73,10 @@ export default function LyricVersions({ song, currentSource, onUse, onClose }) {
       setVoting(null);
     }
   };
+
+  // Voting requires an account — pops the sign-in sheet when signed out, then
+  // casts the vote automatically once the user is authenticated.
+  const vote = (v) => requireAuth(() => castVote(v), { reason: "vote" });
 
   const preview = (v) =>
     String(v.plain || v.plainRoman || "")

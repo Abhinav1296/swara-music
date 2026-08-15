@@ -25,5 +25,6 @@ export const STORAGE_KEYS = {
   shuffle: "swara:shuffle", // "true" / "false"
   repeat: "swara:repeat", // "off" | "all" | "one"
   playlists: "swara:playlists", // { id, name, songs: song[], createdAt }[]
+  playlistUsage: "swara:playlistUsage", // { [id]: { count, lastUsedAt } } — local-only, per-device
   queue: "swara:queue", // { current, upcoming, played, progress }
 };

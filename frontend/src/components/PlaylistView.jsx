@@ -31,7 +31,7 @@ import PlaylistModal from "./PlaylistModal";
 export default function PlaylistView() {
   const { route, navigate } = useRouter();
   const { current, isPlaying, play, shuffle, toggleShuffle } = usePlayer();
-  const { getPlaylist, renamePlaylist, deletePlaylist, setPlaylistCover, playlistNameExists } =
+  const { getPlaylist, renamePlaylist, deletePlaylist, setPlaylistCover, playlistNameExists, notePlaylistUsed } =
     usePlaylists();
 
   const id = route.params.id;
@@ -191,7 +191,10 @@ export default function PlaylistView() {
               <button
                 type="button"
                 disabled={songs.length === 0}
-                onClick={() => play(songs[0], songs)}
+                onClick={() => {
+                  notePlaylistUsed(id);
+                  play(songs[0], songs);
+                }}
                 className="inline-flex items-center gap-2 btn-glossy rounded-full px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-30"
               >
                 {listPlaying ? <Pause size={18} fill="white" /> : <Play size={18} fill="white" />}

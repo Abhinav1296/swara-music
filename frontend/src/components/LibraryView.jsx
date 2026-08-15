@@ -5,8 +5,10 @@ import { useLibrary } from "../context/LibraryContext";
 import { usePlaylists } from "../context/PlaylistContext";
 import { usePlayer } from "../context/PlayerContext";
 import { useRouter } from "../context/RouterContext";
+import { useAuthGate } from "../context/AuthGate";
 import SongCard from "./SongCard";
 import PlaylistModal from "./PlaylistModal";
+import PlaylistStrip from "./PlaylistStrip";
 import AddToPlaylistSheet from "./AddToPlaylistSheet";
 
 const GRID =
@@ -58,6 +60,7 @@ export default function LibraryView() {
   const { playlists, createPlaylist, playlistNameExists } = usePlaylists();
   const { current, isPlaying, play } = usePlayer();
   const { navigate } = useRouter();
+  const { requireAuth } = useAuthGate();
   const [createOpen, setCreateOpen] = useState(false);
   const [sheetSong, setSheetSong] = useState(null);
 
@@ -75,6 +78,9 @@ export default function LibraryView() {
 
   return (
     <div className="pt-2">
+      {/* Most-used playlists — swipeable quick-play carousel. */}
+      <PlaylistStrip />
+
       {/* Liked Songs hero */}
       <div className="glass relative mb-8 flex items-center gap-5 overflow-hidden rounded-3xl p-5 md:gap-7 md:p-8">
         <div className="pointer-events-none absolute -right-16 -top-16 h-60 w-60 rounded-full bg-accent/30 blur-3xl" />
@@ -129,7 +135,7 @@ export default function LibraryView() {
         <h2 className="text-xl font-bold text-white">Your Playlists</h2>
         <button
           type="button"
-          onClick={() => setCreateOpen(true)}
+          onClick={() => requireAuth(() => setCreateOpen(true), { reason: "playlist" })}
           className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white transition hover:bg-white/15"
         >
           <Plus size={16} /> New

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, ListMusic, Plus, X } from "lucide-react";
 import { usePlaylists } from "../context/PlaylistContext";
+import { useAuthGate } from "../context/AuthGate";
 import PlaylistModal from "./PlaylistModal";
 
 /**
@@ -14,6 +15,7 @@ import PlaylistModal from "./PlaylistModal";
 export default function AddToPlaylistSheet({ song, onClose }) {
   const { playlists, createPlaylist, addToPlaylist, isInPlaylist, playlistNameExists } =
     usePlaylists();
+  const { requireAuth } = useAuthGate();
   const [modalOpen, setModalOpen] = useState(false);
   const open = Boolean(song);
 
@@ -67,7 +69,7 @@ export default function AddToPlaylistSheet({ song, onClose }) {
                 <div className="no-scrollbar max-h-[52vh] overflow-y-auto">
                   <button
                     type="button"
-                    onClick={() => setModalOpen(true)}
+                    onClick={() => requireAuth(() => setModalOpen(true), { reason: "playlist" })}
                     className="flex w-full items-center gap-2.5 rounded-xl px-3 py-3 text-left text-sm font-medium text-white transition hover:bg-white/10"
                   >
                     <Plus size={18} className="text-accent" />

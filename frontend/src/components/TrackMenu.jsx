@@ -16,6 +16,7 @@ import { usePlayer } from "../context/PlayerContext";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlaylists } from "../context/PlaylistContext";
 import { useRouter } from "../context/RouterContext";
+import { useAuthGate } from "../context/AuthGate";
 import PlaylistModal from "./PlaylistModal";
 
 /**
@@ -39,6 +40,7 @@ export default function TrackMenu({ song, triggerClassName, iconSize = 18, eleva
   const { playlists, createPlaylist, addToPlaylist, isInPlaylist, playlistNameExists } =
     usePlaylists();
   const { navigate } = useRouter();
+  const { requireAuth } = useAuthGate();
 
   const toggle = (e) => {
     e.stopPropagation();
@@ -195,7 +197,7 @@ export default function TrackMenu({ song, triggerClassName, iconSize = 18, eleva
                         type="button"
                         onClick={() => {
                           setOpen(false);
-                          setModalOpen(true);
+                          requireAuth(() => setModalOpen(true), { reason: "playlist" });
                         }}
                         className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm text-white/80 transition hover:bg-white/10 hover:text-white"
                       >
