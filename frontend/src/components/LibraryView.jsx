@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, useMotionValue, useTransform } from "framer-motion";
-import { Heart, ListMusic, Music2, Play, Plus } from "lucide-react";
+import { Heart, ListMusic, Music2, Pause, Play, Plus } from "lucide-react";
 import { useLibrary } from "../context/LibraryContext";
 import { usePlaylists } from "../context/PlaylistContext";
 import { usePlayer } from "../context/PlayerContext";
@@ -8,8 +8,8 @@ import { useRouter } from "../context/RouterContext";
 import { useAuthGate } from "../context/AuthGate";
 import SongCard from "./SongCard";
 import PlaylistModal from "./PlaylistModal";
-import PlaylistStrip from "./PlaylistStrip";
 import AddToPlaylistSheet from "./AddToPlaylistSheet";
+import DownloadsSection from "./DownloadsSection";
 import LocalFilesSection from "./LocalFilesSection";
 
 const GRID =
@@ -18,7 +18,7 @@ const GRID =
 /**
  * A Liked SongCard you can swipe sideways to add to a playlist. A horizontal
  * drag past the threshold fires `onSwipe(song)`; anything short snaps back and a
- * tap still plays. An accent hint fades in behind the card as it slides so the
+ * tap reveals the card's controls. An accent hint fades in behind the card as it slides so the
  * gesture is discoverable. Vertical scrolling stays with the page (touch-pan-y +
  * dragDirectionLock).
  */
@@ -58,8 +58,8 @@ function SwipeToAdd({ song, list, onSwipe }) {
 /** Local library: liked songs (playlist) + custom playlists + recently played. */
 export default function LibraryView() {
   const { likedSongs, recentlyPlayed, clearRecent } = useLibrary();
-  const { playlists, createPlaylist, playlistNameExists } = usePlaylists();
-  const { current, isPlaying, play } = usePlayer();
+  const { playlists, createPlaylist, playlistNameExists, notePlaylistUsed } = usePlaylists();
+  const { current, isPlaying, play, toggle } = usePlayer();
   const { navigate } = useRouter();
   const { requireAuth } = useAuthGate();
   const [createOpen, setCreateOpen] = useState(false);
@@ -79,9 +79,6 @@ export default function LibraryView() {
 
   return (
     <div className="pt-2">
-      {/* Most-used playlists — swipeable quick-play carousel. */}
-      <PlaylistStrip />
-
       {/* Liked Songs hero */}
       <div className="glass relative mb-8 flex items-center gap-5 overflow-hidden rounded-3xl p-5 md:gap-7 md:p-8">
         <div className="pointer-events-none absolute -right-16 -top-16 h-60 w-60 rounded-full bg-accent/30 blur-3xl" />
@@ -155,33 +152,64 @@ export default function LibraryView() {
           </p>
         </div>
       ) : (
-        <div className={GRID}>
-          {playlists.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => navigate("playlist", { id: p.id, name: p.name })}
-              className="group flex flex-col gap-3 rounded-3xl p-3 text-left glass transition-colors hover:bg-white/10"
-            >
-              <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-white/15 to-white/5">
-                {p.cover ? (
-                  <img src={p.cover} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <Music2 size={40} className="text-white/90" />
-                )}
-              </div>
-              <div className="min-w-0 px-1 pb-1">
-                <h3 className="truncate text-sm font-semibold text-white" title={p.name}>
+        // Side-scrolling row (same tile + in-place play as the old "Jump back in").
+        <div className="no-scrollbar -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 md:mx-0 md:px-0">
+          {playlists.map((p) => {
+            const songs = p.songs || [];
+            const isThis = current && songs.some((s) => s.id === current.id);
+            const playingThis = isThis && isPlaying;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => navigate("playlist", { id: p.id, name: p.name })}
+                className="group w-32 shrink-0 snap-start text-left sm:w-36"
+              >
+                <div className="relative aspect-square overflow-hidden rounded-2xl bg-gradient-to-br from-white/15 to-white/5 ring-1 ring-white/10 shadow-glow">
+                  {p.cover ? (
+                    <img src={p.cover} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <Music2 size={38} className="text-white/90" />
+                    </div>
+                  )}
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+                  <button
+                    type="button"
+                    disabled={songs.length === 0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (playingThis || isThis) {
+                        toggle();
+                      } else {
+                        notePlaylistUsed(p.id);
+                        play(songs[0], songs);
+                      }
+                    }}
+                    aria-label={playingThis ? `Pause ${p.name}` : `Play ${p.name}`}
+                    className="btn-glossy absolute bottom-2 right-2 flex h-10 w-10 items-center justify-center rounded-full text-white shadow-lg transition hover:opacity-90 disabled:opacity-0"
+                  >
+                    {playingThis ? (
+                      <Pause size={16} fill="white" />
+                    ) : (
+                      <Play size={16} fill="white" className="ml-0.5" />
+                    )}
+                  </button>
+                </div>
+                <p className="mt-2 truncate px-0.5 text-sm font-semibold text-white" title={p.name}>
                   {p.name}
-                </h3>
-                <p className="truncate text-xs text-white/50">
-                  {p.songs.length} {p.songs.length === 1 ? "song" : "songs"}
                 </p>
-              </div>
-            </button>
-          ))}
+                <p className="truncate px-0.5 text-xs text-white/50">
+                  {songs.length} {songs.length === 1 ? "song" : "songs"}
+                </p>
+              </button>
+            );
+          })}
         </div>
       )}
+
+      {/* Downloads — songs saved for offline playback (native/APK only) */}
+      <DownloadsSection />
 
       {/* Local Files — import & play your own device audio (native/APK only) */}
       <LocalFilesSection />

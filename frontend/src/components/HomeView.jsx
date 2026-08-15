@@ -8,6 +8,9 @@ import Section from "./Section";
 import ArtistCard from "./ArtistCard";
 import AlbumCard from "./AlbumCard";
 import RecommendationsShelf from "./RecommendationsShelf";
+import Marquee from "./Marquee";
+import OfflineNotice from "./OfflineNotice";
+import useOnlineStatus from "../hooks/useOnlineStatus";
 
 // Curated Telugu moods → JioSaavn search queries. Each becomes a horizontal
 // shelf, fetched live from JioSaavn (daily-cached) via /api/trending?q=…
@@ -200,6 +203,12 @@ export default function HomeView() {
   const featured = heroItems[heroIdx];
   const featuredPlaying = featured && current?.id === featured.id && isPlaying;
 
+  // Home is entirely network-fed (trending, new releases, shelves); with no
+  // connection there's nothing to show, so point the user to their offline
+  // Downloads / Local Files instead.
+  const online = useOnlineStatus();
+  if (!online) return <OfflineNotice />;
+
   return (
     <div className="pt-2">
       {/* Greeting */}
@@ -250,10 +259,10 @@ export default function HomeView() {
               <p className="text-xs font-semibold uppercase tracking-widest text-accent">
                 Featured today
               </p>
-              <h2 className="mt-1 truncate text-3xl font-extrabold tracking-tight text-white md:text-5xl">
+              <Marquee className="mt-1 text-3xl font-extrabold tracking-tight text-white md:text-5xl">
                 {featured.trackName}
-              </h2>
-              <p className="mt-2 truncate text-white/70">{featured.artistName}</p>
+              </Marquee>
+              <Marquee className="mt-2 text-white/70">{featured.artistName}</Marquee>
               <div className="mt-5 flex items-center justify-center gap-4 md:justify-start">
                 <button
                   type="button"

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { CircleArrowDown, Pause, Play } from "lucide-react";
 import { motion } from "framer-motion";
 import { usePlayer } from "../context/PlayerContext";
@@ -15,6 +16,9 @@ export default function SongCard({ song, list }) {
   const { current, isPlaying, play } = usePlayer();
   const { isDownloaded } = useOffline();
   const { navigate } = useRouter();
+  // Tap-to-reveal: on touch the hover-only controls never show, so a first tap
+  // surfaces Play / ♥ / ⋮ instead of playing instantly; the Play button plays.
+  const [revealed, setRevealed] = useState(false);
 
   const isActive = current?.id === song.id;
   const isPlayingThis = isActive && isPlaying;
@@ -39,7 +43,7 @@ export default function SongCard({ song, list }) {
     <motion.div
       whileHover={{ y: -6 }}
       transition={{ type: "spring", stiffness: 300, damping: 24 }}
-      onClick={() => play(song, context)}
+      onClick={() => setRevealed((v) => !v)}
       className={`group relative flex cursor-pointer flex-col gap-3 rounded-3xl p-3 transition-colors ${
         isActive ? "bg-white/10 ring-1 ring-accent/50" : "glass hover:bg-white/10"
       }`}
@@ -51,15 +55,29 @@ export default function SongCard({ song, list }) {
           loading="lazy"
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <div
+          className={`pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent transition-opacity duration-300 group-hover:opacity-100 ${
+            revealed ? "opacity-100" : "opacity-0"
+          }`}
+        />
 
         {/* Like (top-left) */}
-        <div className="absolute left-2 top-2 translate-y-1 opacity-0 transition-all group-hover:translate-y-0 group-hover:opacity-100">
+        <div
+          className={`absolute left-2 top-2 transition-all group-hover:translate-y-0 group-hover:opacity-100 group-hover:pointer-events-auto ${
+            revealed
+              ? "translate-y-0 opacity-100"
+              : "pointer-events-none translate-y-1 opacity-0"
+          }`}
+        >
           <LikeButton song={song} className="h-8 w-8 bg-black/40 backdrop-blur-md" />
         </div>
 
         {/* More menu (top-right) */}
-        <div className="absolute right-2 top-2 opacity-0 transition-opacity group-hover:opacity-100">
+        <div
+          className={`absolute right-2 top-2 transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto ${
+            revealed ? "opacity-100" : "pointer-events-none opacity-0"
+          }`}
+        >
           <TrackMenu song={song} />
         </div>
 
@@ -77,8 +95,12 @@ export default function SongCard({ song, list }) {
             e.stopPropagation();
             play(song, context);
           }}
-          aria-label={isPlayingThis ? "Pause preview" : "Play preview"}
-          className="absolute bottom-3 right-3 flex h-12 w-12 translate-y-3 items-center justify-center btn-glossy rounded-full text-white opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 hover:scale-105"
+          aria-label={isPlayingThis ? "Pause" : "Play"}
+          className={`absolute bottom-3 right-3 flex h-12 w-12 items-center justify-center btn-glossy rounded-full text-white transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-hover:pointer-events-auto hover:scale-105 ${
+            revealed
+              ? "translate-y-0 opacity-100"
+              : "pointer-events-none translate-y-3 opacity-0"
+          }`}
         >
           {isPlayingThis ? (
             <Pause size={20} fill="white" />

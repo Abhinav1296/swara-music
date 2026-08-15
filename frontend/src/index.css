@@ -191,3 +191,21 @@ input[type="range"]:disabled::-moz-range-thumb {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Sliding "marquee" for text too long to fit its box — see components/Marquee.jsx.
+   Two identical copies sit back-to-back inside the track; translating the whole
+   track by -50% slides copy 2 into copy 1's starting spot, so the loop seams
+   perfectly with no visible jump. */
+@keyframes swara-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .swara-marquee-track {
+    animation: none !important;
+  }
+}

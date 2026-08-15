@@ -4,6 +4,8 @@ import { Disc3 } from "lucide-react";
 import { getAlbums } from "../api/client";
 import AlbumCard from "./AlbumCard";
 import SkeletonCard from "./SkeletonCard";
+import OfflineNotice from "./OfflineNotice";
+import useOnlineStatus from "../hooks/useOnlineStatus";
 
 const PAGE = 48;
 const GRID =
@@ -52,6 +54,11 @@ export default function AlbumsView() {
   }, [albums.length]);
 
   const hasMore = albums.length < total;
+
+  // Albums is a live grid from the backend; offline there's nothing to fetch, so
+  // send the user to their offline Downloads / Local Files.
+  const online = useOnlineStatus();
+  if (!online) return <OfflineNotice />;
 
   return (
     <div className="pt-2">

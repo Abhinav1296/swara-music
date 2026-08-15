@@ -259,8 +259,10 @@ export default function PlaylistView() {
             </div>
           </div>
 
-          {/* Kebab (rename / delete) */}
-          <div className="relative">
+          {/* Kebab (rename / delete) — pinned to the header's top-right corner
+              so it stays on the upper line instead of dropping below the
+              Play/Shuffle row on mobile. */}
+          <div className="absolute right-3 top-3 z-10">
             <button
               ref={kebabRef}
               type="button"
