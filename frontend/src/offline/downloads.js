@@ -122,8 +122,19 @@ export async function downloadSong(song, { signal } = {}) {
 
   const path = `${AUDIO_DIR}/${safeId(song.id)}.${extFromUrl(streamUrl)}`;
 
-  // Stream the bytes natively (no CORS, no base64 round-trip). `recursive`
-  // creates the swara/audio folders on first use.
+  // The deprecated Filesystem.downloadFile IGNORES `recursive` and never creates
+  // nested parent folders — it only touches the base Directory.Data, then opens a
+  // FileOutputStream at swara/audio/<id>.ext, which throws FileNotFoundException
+  // when swara/audio/ doesn't exist yet (unlike writeFile, which honors
+  // recursive). So pre-create the folder ourselves; mkdir honors recursive.
+  try {
+    await Filesystem.mkdir({ path: AUDIO_DIR, directory: Directory.Data, recursive: true });
+  } catch {
+    // Already exists (the common case) — fine. A real write error, if any,
+    // surfaces on downloadFile below.
+  }
+
+  // Stream the bytes natively (no CORS, no base64 round-trip).
   await Filesystem.downloadFile({
     url: streamUrl,
     path,
