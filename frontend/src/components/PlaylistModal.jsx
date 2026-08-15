@@ -14,6 +14,8 @@ import { X } from "lucide-react";
  *   initialName – pre-filled name when renaming
  *   onSubmit(name) – called with the trimmed name on confirm
  *   onClose     – called on cancel / backdrop click / Esc
+ *   nameTaken(name) – optional; return true if the trimmed name already exists.
+ *                     When it does, submit is blocked and an inline hint shows.
  */
 export default function PlaylistModal({
   open,
@@ -22,6 +24,7 @@ export default function PlaylistModal({
   initialName = "",
   onSubmit,
   onClose,
+  nameTaken,
 }) {
   const [name, setName] = useState(initialName);
   const inputRef = useRef(null);
@@ -46,10 +49,12 @@ export default function PlaylistModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  const trimmed = name.trim();
+  const taken = Boolean(trimmed) && Boolean(nameTaken?.(trimmed));
+
   const submit = (e) => {
     e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed || taken) return;
     onSubmit?.(trimmed);
   };
 
@@ -98,8 +103,18 @@ export default function PlaylistModal({
                 placeholder="Playlist name"
                 aria-label="Playlist name"
                 maxLength={60}
-                className="w-full rounded-xl bg-white/10 px-4 py-3 text-sm text-white outline-none ring-1 ring-white/10 transition placeholder:text-white/40 focus:bg-white/15 focus:ring-white/25"
+                aria-invalid={taken}
+                className={`w-full rounded-xl bg-white/10 px-4 py-3 text-sm text-white outline-none ring-1 transition placeholder:text-white/40 focus:bg-white/15 ${
+                  taken
+                    ? "ring-accent/70 focus:ring-accent"
+                    : "ring-white/10 focus:ring-white/25"
+                }`}
               />
+              {taken && (
+                <p className="mt-2 px-1 text-xs font-medium text-accent">
+                  You already have a playlist named “{trimmed}”.
+                </p>
+              )}
               <div className="mt-5 flex justify-end gap-2">
                 <button
                   type="button"
@@ -110,7 +125,7 @@ export default function PlaylistModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={!name.trim()}
+                  disabled={!trimmed || taken}
                   className="btn-glossy rounded-full px-5 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-30"
                 >
                   {submitLabel}

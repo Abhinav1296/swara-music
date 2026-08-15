@@ -12,7 +12,8 @@ import PlaylistModal from "./PlaylistModal";
  * (null/undefined keeps it closed) and an `onClose` handler.
  */
 export default function AddToPlaylistSheet({ song, onClose }) {
-  const { playlists, createPlaylist, addToPlaylist, isInPlaylist } = usePlaylists();
+  const { playlists, createPlaylist, addToPlaylist, isInPlaylist, playlistNameExists } =
+    usePlaylists();
   const [modalOpen, setModalOpen] = useState(false);
   const open = Boolean(song);
 
@@ -116,6 +117,7 @@ export default function AddToPlaylistSheet({ song, onClose }) {
         title="New Playlist"
         submitLabel="Create"
         onSubmit={handleNew}
+        nameTaken={playlistNameExists}
         onClose={() => setModalOpen(false)}
       />
     </>

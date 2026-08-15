@@ -55,7 +55,7 @@ function SwipeToAdd({ song, list, onSwipe }) {
 /** Local library: liked songs (playlist) + custom playlists + recently played. */
 export default function LibraryView() {
   const { likedSongs, recentlyPlayed, clearRecent } = useLibrary();
-  const { playlists, createPlaylist } = usePlaylists();
+  const { playlists, createPlaylist, playlistNameExists } = usePlaylists();
   const { current, isPlaying, play } = usePlayer();
   const { navigate } = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
@@ -202,6 +202,7 @@ export default function LibraryView() {
         title="New Playlist"
         submitLabel="Create"
         onSubmit={handleCreate}
+        nameTaken={playlistNameExists}
         onClose={() => setCreateOpen(false)}
       />
 

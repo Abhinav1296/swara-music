@@ -71,6 +71,14 @@ export function PlaylistProvider({ children }) {
   // Always mirror to localStorage (offline / logged-out store + instant boot).
   useEffect(() => saveJSON(STORAGE_KEYS.playlists, playlists), [playlists]);
 
+  // A live mirror of `playlists` so the create/rename callbacks (which are memo'd
+  // with empty deps) can read the current set synchronously — needed to reject a
+  // duplicate name and return the right id without going stale.
+  const playlistsRef = useRef(playlists);
+  useEffect(() => {
+    playlistsRef.current = playlists;
+  }, [playlists]);
+
   // The token we've hydrated for, the last JSON we synced with the server (so
   // write-through only fires on genuine user changes), and the debounce timer.
   const syncedTokenRef = useRef(null);
@@ -133,9 +141,31 @@ export function PlaylistProvider({ children }) {
     };
   }, [playlists, token]);
 
+  /**
+   * True if `name` (case-insensitively, trimmed) already belongs to a playlist.
+   * Pass `exceptId` to ignore one playlist — used when renaming so a playlist can
+   * keep its own name. Powers the inline "name taken" guard in PlaylistModal.
+   */
+  const playlistNameExists = useCallback(
+    (name, exceptId = null) => {
+      const t = (name || "").trim().toLowerCase();
+      if (!t) return false;
+      return playlists.some(
+        (p) => p.id !== exceptId && (p.name || "").trim().toLowerCase() === t
+      );
+    },
+    [playlists]
+  );
+
   const createPlaylist = useCallback((name) => {
-    const id = uid();
     const trimmed = (name || "").trim() || "My Playlist";
+    // Never create two playlists with the same name — if one already exists,
+    // hand back its id so callers open/append to it instead of duplicating.
+    const existing = playlistsRef.current.find(
+      (p) => (p.name || "").trim().toLowerCase() === trimmed.toLowerCase()
+    );
+    if (existing) return existing.id;
+    const id = uid();
     setPlaylists((prev) => [...prev, { id, name: trimmed, songs: [], createdAt: Date.now() }]);
     return id;
   }, []);
@@ -143,6 +173,11 @@ export function PlaylistProvider({ children }) {
   const renamePlaylist = useCallback((id, name) => {
     const trimmed = (name || "").trim();
     if (!trimmed) return;
+    // Refuse a rename that would collide with another playlist's name.
+    const clash = playlistsRef.current.some(
+      (p) => p.id !== id && (p.name || "").trim().toLowerCase() === trimmed.toLowerCase()
+    );
+    if (clash) return;
     setPlaylists((prev) => prev.map((p) => (p.id === id ? { ...p, name: trimmed } : p)));
   }, []);
 
@@ -199,6 +234,7 @@ export function PlaylistProvider({ children }) {
 
   const value = {
     playlists,
+    playlistNameExists,
     createPlaylist,
     renamePlaylist,
     deletePlaylist,

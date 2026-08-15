@@ -31,7 +31,8 @@ import PlaylistModal from "./PlaylistModal";
 export default function PlaylistView() {
   const { route, navigate } = useRouter();
   const { current, isPlaying, play, shuffle, toggleShuffle } = usePlayer();
-  const { getPlaylist, renamePlaylist, deletePlaylist, setPlaylistCover } = usePlaylists();
+  const { getPlaylist, renamePlaylist, deletePlaylist, setPlaylistCover, playlistNameExists } =
+    usePlaylists();
 
   const id = route.params.id;
   const playlist = getPlaylist(id);
@@ -333,6 +334,7 @@ export default function PlaylistView() {
         submitLabel="Save"
         initialName={name}
         onSubmit={handleRename}
+        nameTaken={(n) => playlistNameExists(n, id)}
         onClose={() => setRenameOpen(false)}
       />
 

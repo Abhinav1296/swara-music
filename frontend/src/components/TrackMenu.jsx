@@ -36,7 +36,8 @@ export default function TrackMenu({ song, triggerClassName, iconSize = 18, eleva
 
   const { playNext, addToQueue } = usePlayer();
   const { isLiked, toggleLike } = useLibrary();
-  const { playlists, createPlaylist, addToPlaylist, isInPlaylist } = usePlaylists();
+  const { playlists, createPlaylist, addToPlaylist, isInPlaylist, playlistNameExists } =
+    usePlaylists();
   const { navigate } = useRouter();
 
   const toggle = (e) => {
@@ -237,6 +238,7 @@ export default function TrackMenu({ song, triggerClassName, iconSize = 18, eleva
         title="New Playlist"
         submitLabel="Create"
         onSubmit={handleNewPlaylist}
+        nameTaken={playlistNameExists}
         onClose={() => setModalOpen(false)}
       />
     </>
