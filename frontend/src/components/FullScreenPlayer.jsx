@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AlarmClock,
   ChevronDown,
   Layers,
   ListMusic,
@@ -28,6 +29,7 @@ import { resolveActiveLine } from "../lyrics/lyrics";
 import SyncedLyrics from "./SyncedLyrics";
 import TrackMenu from "./TrackMenu";
 import LyricVersions from "./LyricVersions";
+import SleepTimerSheet from "./SleepTimerSheet";
 import { pushBackHandler } from "../utils/backStack";
 
 /**
@@ -52,6 +54,8 @@ export default function FullScreenPlayer() {
     streamError,
     lyrics,
     lyricsStatus,
+    sleep,
+    sleepRemainingMs,
     toggle,
     next,
     prev,
@@ -70,10 +74,26 @@ export default function FullScreenPlayer() {
   const togglePanel = (p) => setRightPanel((cur) => (cur === p ? "none" : p));
   const [lyricScript, setLyricScript] = useState("telugu"); // "telugu" | "roman"
   const [versionsOpen, setVersionsOpen] = useState(false);
+  const [sleepOpen, setSleepOpen] = useState(false);
   // A version the listener picked to view instead of the default (normalized
   // lyrics + its label). Null = show the backend's default lyrics.
   const [overrideLyrics, setOverrideLyrics] = useState(null);
   const [overrideLabel, setOverrideLabel] = useState(null);
+
+  // Compact badge shown next to the alarm icon while a sleep timer is armed:
+  // a live m:ss (or h:mm) countdown for a time timer, or the remaining song
+  // count for a song-based one. The full picker shows the verbose status.
+  let sleepLabel = null;
+  if (sleep?.kind === "time") {
+    const total = Math.max(0, Math.round(sleepRemainingMs / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    sleepLabel = h > 0 ? `${h}:${pad(m)}` : `${m}:${pad(s)}`;
+  } else if (sleep?.kind === "songs") {
+    sleepLabel = sleep.endOfSong ? "1" : String(sleep.songsLeft ?? "");
+  }
 
   // Swipe the cover art left/right to move to the next / previous track (the
   // Apple-Music gesture). Anchored to the artwork only, so the seek and volume
@@ -573,6 +593,23 @@ export default function FullScreenPlayer() {
                     background: `linear-gradient(to right, #fff ${volPct}%, rgba(255,255,255,0.18) ${volPct}%)`,
                   }}
                 />
+                {/* Sleep timer */}
+                <button
+                  type="button"
+                  onClick={() => setSleepOpen(true)}
+                  aria-label="Sleep timer"
+                  aria-pressed={Boolean(sleep)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-full px-2 py-1.5 transition hover:bg-white/10 ${
+                    sleep ? "text-accent" : "text-white/60 hover:text-white"
+                  }`}
+                >
+                  <AlarmClock size={18} />
+                  {sleep && (
+                    <span className="text-xs font-semibold tabular-nums">
+                      {sleepLabel}
+                    </span>
+                  )}
+                </button>
               </div>
 
               {/* Lyrics / Up Next toggles — separate buttons, mobile + desktop.
@@ -699,6 +736,9 @@ export default function FullScreenPlayer() {
               onClose={() => setVersionsOpen(false)}
             />
           )}
+
+          {/* Sleep timer picker (portals to <body> above the player) */}
+          <SleepTimerSheet open={sleepOpen} onClose={() => setSleepOpen(false)} />
         </motion.div>
       )}
     </AnimatePresence>,

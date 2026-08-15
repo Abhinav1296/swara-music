@@ -108,6 +108,15 @@ export function PlayerProvider({ children }) {
   const [queueOpen, setQueueOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
 
+  // --- Sleep timer ---
+  // null | { kind: "time", endsAt, minutes }
+  //      | { kind: "songs", songsLeft, total, endOfSong? }
+  const [sleep, setSleep] = useState(null);
+  const [sleepRemainingMs, setSleepRemainingMs] = useState(0); // live countdown for "time"
+  // True when playback came from a real collection (playlist / album / shelf),
+  // which is what unlocks the "after N songs" sleep option.
+  const [queueIsCollection, setQueueIsCollection] = useState(false);
+
   // --- Async stream resolution state ---
   const [isResolvingStream, setIsResolvingStream] = useState(false);
   // streamError: null | "no_stream" | "not_found" | "upstream"
@@ -120,6 +129,12 @@ export function PlayerProvider({ children }) {
   // handler never reads stale closures.
   const transportRef = useRef({});
   transportRef.current = { current, upcoming, played, shuffle, repeat };
+
+  // Mirrors for the stable audio-event handlers (registered once) to read the
+  // freshest sleep state / stop fn without re-registering.
+  const sleepRef = useRef(null);
+  sleepRef.current = sleep;
+  const stopForSleepRef = useRef(null);
 
   // --- Queue persistence -------------------------------------------------
   const progressRef = useRef(0);
@@ -394,8 +409,13 @@ export function PlayerProvider({ children }) {
   // queue end as before.
   const LOW_WATER = 2; // top up once the pool is down to ≤2 songs of runway
   const RADIO_BATCH = 20;
+  const MAX_RADIO_TRIES = 5; // per seed, before giving up (covers a cold backend)
+  const RADIO_RETRY_MS = 3500;
   const extendInflightRef = useRef(false);
-  const lastExtendSeedRef = useRef(null);
+  const lastExtendSeedRef = useRef(null); // seed id we've successfully topped up
+  const extendTriesRef = useRef({ id: null, n: 0 }); // attempts for the current seed
+  const extendRetryTimerRef = useRef(null);
+  const extendQueueIfLowRef = useRef(null); // stable self-reference for retries
 
   const extendQueueIfLow = useCallback(async () => {
     const st = transportRef.current;
@@ -406,9 +426,18 @@ export function PlayerProvider({ children }) {
     const poolCount = shuffle ? played.length + upcoming.length : upcoming.length;
     if (poolCount > LOW_WATER) return;
     if (extendInflightRef.current) return;
-    if (lastExtendSeedRef.current === current.id) return; // one attempt / song
-    lastExtendSeedRef.current = current.id;
+    if (lastExtendSeedRef.current === current.id) return; // already topped up for this seed
+
+    // Bound the attempts per seed so a genuinely match-less track can't retry
+    // forever. Reset the counter whenever the seed changes.
+    if (extendTriesRef.current.id !== current.id) {
+      extendTriesRef.current = { id: current.id, n: 0 };
+    }
+    if (extendTriesRef.current.n >= MAX_RADIO_TRIES) return;
+    extendTriesRef.current.n += 1;
+
     extendInflightRef.current = true;
+    let appended = false;
     try {
       const { results } = await getRelated({
         id: current.id,
@@ -426,19 +455,48 @@ export function PlayerProvider({ children }) {
       const fresh = (results || []).filter(
         (t) => t && !seenIds.has(t.id) && !seenKeys.has(trackKey(t))
       );
-      if (fresh.length) setUpcoming((u) => [...u, ...fresh]);
+      if (fresh.length) {
+        setUpcoming((u) => [...u, ...fresh]);
+        appended = true;
+      }
     } catch {
       // Radio is best-effort; on failure the queue simply ends as before.
     } finally {
       extendInflightRef.current = false;
+      if (appended) {
+        // Topped up — lock this seed so we don't refetch for it.
+        lastExtendSeedRef.current = current.id;
+      } else if (
+        !current.id ||
+        (transportRef.current.current && transportRef.current.current.id === current.id)
+      ) {
+        // Nothing added yet (failed/empty/cold backend) and we're still on the
+        // same track: schedule one spaced retry, up to MAX_RADIO_TRIES, so the
+        // radio recovers on its own instead of dead-ending at song-end. Bailing
+        // early on a track change avoids retrying a stale seed.
+        if (extendRetryTimerRef.current) clearTimeout(extendRetryTimerRef.current);
+        if (extendTriesRef.current.n < MAX_RADIO_TRIES) {
+          extendRetryTimerRef.current = setTimeout(() => {
+            extendQueueIfLowRef.current?.();
+          }, RADIO_RETRY_MS);
+        }
+      }
     }
   }, []);
+
+  // Stable self-reference so the retry timer always calls the latest closure.
+  extendQueueIfLowRef.current = extendQueueIfLow;
 
   // Watch the queue and top it up just before it runs dry. Fires on song
   // change and whenever the pool shrinks; the guards above keep it to one
   // effective fetch per low-water crossing.
   useEffect(() => {
     extendQueueIfLow();
+    return () => {
+      // Cancel any pending radio retry when the queue/track changes or on
+      // unmount; the re-run (or teardown) supersedes it.
+      if (extendRetryTimerRef.current) clearTimeout(extendRetryTimerRef.current);
+    };
   }, [current, upcoming.length, played.length, shuffle, repeat, extendQueueIfLow]);
 
   // Restore queue + current track from a previous session (best effort).
@@ -505,6 +563,9 @@ export function PlayerProvider({ children }) {
       const i = idx === -1 ? 0 : idx;
       const newUpcoming = contextList.slice(i + 1);
       const newPlayed = contextList.slice(0, i);
+      // Remember whether this playback came from a real collection (>1 track),
+      // which is what unlocks the "after N songs" sleep-timer option.
+      setQueueIsCollection(contextList.length > 1);
       setCurrent(song);
       setUpcoming(newUpcoming);
       setPlayed(newPlayed);
@@ -743,6 +804,68 @@ export function PlayerProvider({ children }) {
   const isPlayingRef = useRef(false);
   isPlayingRef.current = isPlaying;
 
+  // --- Sleep timer ---------------------------------------------------------
+  // Pause playback and clear the timer. Used by both the time-based tick and
+  // the song-count hook in `onEnded`.
+  const stopForSleep = useCallback(() => {
+    const audio = audioRef.current;
+    if (audio) {
+      try {
+        audio.pause();
+      } catch {
+        /* ignore */
+      }
+    }
+    wantPlayRef.current = false;
+    setIsPlaying(false);
+    setSleep(null);
+  }, []);
+  stopForSleepRef.current = stopForSleep;
+
+  /**
+   * Arm the sleep timer. `cfg`:
+   *   { kind: "time", minutes }   – stop after N minutes
+   *   { kind: "songs", songs }    – stop after N songs finish (current counts)
+   *   { kind: "endOfSong" }       – stop when the current song finishes
+   * Passing nothing clears it.
+   */
+  const startSleepTimer = useCallback((cfg) => {
+    if (!cfg || !cfg.kind) {
+      setSleep(null);
+      return;
+    }
+    if (cfg.kind === "time") {
+      const mins = Math.max(1, Math.round(Number(cfg.minutes) || 0));
+      setSleep({ kind: "time", endsAt: Date.now() + mins * 60000, minutes: mins });
+    } else if (cfg.kind === "songs") {
+      const n = Math.max(1, Math.round(Number(cfg.songs) || 1));
+      setSleep({ kind: "songs", songsLeft: n, total: n });
+    } else if (cfg.kind === "endOfSong") {
+      setSleep({ kind: "songs", songsLeft: 1, total: 1, endOfSong: true });
+    }
+  }, []);
+
+  const cancelSleepTimer = useCallback(() => setSleep(null), []);
+
+  // Drive the "time" countdown (for the UI) and stop when it elapses. The
+  // interval also acts as a fallback stop while paused; the primary stop while
+  // audio is playing (incl. screen-off) rides on `timeupdate` below, which
+  // keeps firing in the background where JS intervals get throttled.
+  useEffect(() => {
+    if (!sleep || sleep.kind !== "time") {
+      setSleepRemainingMs(0);
+      return undefined;
+    }
+    const tick = () => {
+      const rem = sleep.endsAt - Date.now();
+      setSleepRemainingMs(Math.max(0, rem));
+      if (rem <= 0) stopForSleep();
+    };
+    tick();
+    const iv = setInterval(tick, 1000);
+    return () => clearInterval(iv);
+  }, [sleep, stopForSleep]);
+
   // --- Audio element wiring ------------------------------------------------
 
   // Wire up transport events once.
@@ -752,6 +875,12 @@ export function PlayerProvider({ children }) {
     const onTimeUpdate = () => {
       progressRef.current = audio.currentTime;
       setProgress(audio.currentTime);
+      // Reliable sleep-stop while audio is playing (fires even with the screen
+      // off, where JS timers get throttled).
+      const sl = sleepRef.current;
+      if (sl && sl.kind === "time" && Date.now() >= sl.endsAt) {
+        stopForSleepRef.current?.();
+      }
     };
     const onLoadedMeta = () => {
       setDuration(audio.duration || 0);
@@ -768,6 +897,17 @@ export function PlayerProvider({ children }) {
     const onEnded = () => {
       // eslint-disable-next-line no-console
       console.log("[Swara] onEnded fired → goNext (via goNextRef)");
+      // Sleep timer: "after N songs" / "end of song" counts natural song
+      // completions. When the count runs out, stop instead of advancing.
+      const sl = sleepRef.current;
+      if (sl && sl.kind === "songs") {
+        const left = (sl.songsLeft || 1) - 1;
+        if (left <= 0) {
+          stopForSleepRef.current?.();
+          return;
+        }
+        setSleep({ ...sl, songsLeft: left });
+      }
       goNextRef.current();
     };
     audio.addEventListener("timeupdate", onTimeUpdate);
@@ -843,7 +983,9 @@ export function PlayerProvider({ children }) {
       ["seekto", (d) => {
         if (d && typeof d.seekTime === "number") seekRef.current?.(d.seekTime);
       }],
-      ["stop", () => { if (isPlayingRef.current) toggleRef.current?.(); }],
+      // NOTE: no "stop" action on purpose — registering it makes Android draw the
+      // square Stop button on the lock screen / notification, which the user
+      // didn't want. The in-app Sleep Timer replaces that "turn it off" need.
     ];
     handlers.forEach(([action, handler]) =>
       safeMedia(() => MediaSession.setActionHandler({ action }, handler))
@@ -904,6 +1046,12 @@ export function PlayerProvider({ children }) {
     repeat,
     queueOpen,
     fullscreen,
+    // sleep timer
+    sleep,
+    sleepRemainingMs,
+    queueIsCollection,
+    startSleepTimer,
+    cancelSleepTimer,
     // async stream resolution
     isResolvingStream,
     streamError,
