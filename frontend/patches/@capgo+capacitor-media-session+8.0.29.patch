@@ -1,8 +1,30 @@
 diff --git a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
-index e2c1f05..6521f59 100644
+index e2c1f05..b87fa1d 100644
 --- a/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
 +++ b/node_modules/@capgo/capacitor-media-session/android/src/main/java/com/capgo/mediasession/MediaSessionService.java
-@@ -127,7 +127,13 @@ public class MediaSessionService extends Service {
+@@ -96,6 +96,21 @@ public class MediaSessionService extends Service {
+         mediaSession.setCallback(new MediaSessionCallback(plugin));
+         mediaSession.setActive(true);
+ 
++        // OriginOS / OxygenOS (OnePlus, vivo, OPPO) capsules IGNORE a media
++        // session whose dumpsys shows launchIntent=null — they require the
++        // session to carry a launch activity. Point it back at the app's own
++        // launcher activity so the capsule accepts (and can tap-through to) us.
++        Intent launchIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
++        if (launchIntent != null) {
++            PendingIntent sessionActivity = PendingIntent.getActivity(
++                this,
++                0,
++                launchIntent,
++                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
++            );
++            mediaSession.setSessionActivity(sessionActivity);
++        }
++
+         playbackStateBuilder = new PlaybackStateCompat.Builder()
+             .setActions(PlaybackStateCompat.ACTION_PLAY)
+             .setState(PlaybackStateCompat.STATE_PAUSED, position, playbackSpeed);
+@@ -127,7 +142,13 @@ public class MediaSessionService extends Service {
                      PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT
                  )
              )
