@@ -24,11 +24,11 @@ export default function AlbumsView() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
 
-  // Refetches when connectivity returns. A failure (offline OR an unreachable
-  // backend, which navigator.onLine can't see) leaves `error` set and the page
-  // yields to the OfflineNotice below.
+  // Cached page-0 paints instantly (cold/slow start, or fully offline); swrGet
+  // still refreshes the cache in the background for the next launch. A genuine
+  // failure with no cache leaves `error` set and the page yields to the
+  // OfflineNotice below. Keyed on `online` so reconnecting re-runs.
   useEffect(() => {
-    if (!online) return undefined;
     let active = true;
     setLoading(true);
     setError(null);
@@ -43,6 +43,7 @@ export default function AlbumsView() {
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online]);
 
   const loadMore = useCallback(() => {
@@ -60,10 +61,11 @@ export default function AlbumsView() {
 
   const hasMore = albums.length < total;
 
-  // Albums is a live grid from the backend; with no connection — or a backend we
-  // can't reach — there's nothing to fetch, so send the user to their offline
-  // Downloads / Local Files instead.
-  if (!online || (!loading && error && albums.length === 0)) return <OfflineNotice />;
+  // Only bail to the offline notice when there's genuinely nothing to show — the
+  // fetch failed AND no cached page rendered. With a cached copy (even fully
+  // offline) we render the grid; the notice still points to Downloads / Local
+  // Files when the cache is empty (e.g. a first launch with no connection).
+  if (!loading && error && albums.length === 0) return <OfflineNotice />;
 
   return (
     <div className="pt-2">

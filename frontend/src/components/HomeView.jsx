@@ -78,32 +78,37 @@ export default function HomeView() {
   // returns; a failure (offline OR an unreachable backend, which navigator.onLine
   // can't see) flips `failed` so the whole page yields to the OfflineNotice.
   useEffect(() => {
-    if (!online) return undefined;
     let active = true;
-    getTrending(20)
-      .then((d) => {
-        if (!active) return;
-        const results = d?.results || [];
-        setTrending(results);
-        results.forEach((t) => t?.id && displayedIdsRef.current.add(t.id));
-        setFailed(false);
-      })
+    // Serve the persistently-cached feed first (instant on a cold/slow start, or
+    // fully offline); a background revalidation swaps in fresh data when it lands.
+    // Keyed on `online` so reconnecting re-runs and refreshes.
+    const apply = (d) => {
+      if (!active) return;
+      const results = d?.results || [];
+      setTrending(results);
+      results.forEach((t) => t?.id && displayedIdsRef.current.add(t.id));
+      setFailed(false);
+    };
+    getTrending(20, { onRevalidate: apply })
+      .then(apply)
       .catch(() => {
         if (!active) return;
         setTrending([]);
         setFailed(true);
       });
     return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online]);
 
   // New Releases: real fresh Telugu albums (cards), live from JioSaavn.
   useEffect(() => {
-    if (!online) return undefined;
     let active = true;
-    getNewReleases({ limit: 20 })
-      .then((d) => active && setNewReleases(d?.results || []))
+    const apply = (d) => active && setNewReleases(d?.results || []);
+    getNewReleases({ limit: 20 }, { onRevalidate: apply })
+      .then(apply)
       .catch(() => active && setNewReleases([]));
     return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online]);
 
   // Stable callback for Section to report its fetched songs (avoids refetch loops)
@@ -214,10 +219,11 @@ export default function HomeView() {
   const featured = heroItems[heroIdx];
   const featuredPlaying = featured && current?.id === featured.id && isPlaying;
 
-  // Home is entirely network-fed (trending, new releases, shelves); with no
-  // connection — or a backend we can't reach — there's nothing to show, so point
-  // the user to their offline Downloads / Local Files instead.
-  if (!online || (failed && trending.length === 0)) return <OfflineNotice />;
+  // Only bail to the offline notice when there's genuinely nothing to show — no
+  // cached feed AND the live fetch failed. With a cached copy (even fully
+  // offline) we render it instead; the notice still points to Downloads / Local
+  // Files when the cache is empty (e.g. a first launch with no connection).
+  if (failed && trending.length === 0) return <OfflineNotice />;
 
   return (
     <div className="pt-2">

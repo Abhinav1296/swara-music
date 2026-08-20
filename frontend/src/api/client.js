@@ -10,25 +10,41 @@
 // TTL cache for details).
 
 import { normalizeTrack } from "../utils/trackAdapter";
+import { readCache, writeCache } from "./cache";
 
 const BASE = import.meta.env.VITE_API_BASE || "/api";
 
-// ---- Simple in-memory TTL cache for Home shelves ------------------------- //
-const SHELF_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const _shelfCache = new Map(); // key -> { expiresAt, data }
+// ---- Persistent stale-while-revalidate cache for feed endpoints ---------- //
+// A cache younger than FRESH_MS is served without any network call (this also
+// dedupes navigate-away-and-back within a session). An older-but-present cache
+// is served INSTANTLY and refreshed in the background — so a cold start on a
+// slow connection (or against a sleeping Render backend) paints last-known
+// content immediately instead of hanging on the network. `onRevalidate(fresh)`
+// (optional) lets a caller swap in the refreshed data when it finally lands.
+const FRESH_MS = 5 * 60 * 1000; // 5 minutes
 
-function _shelfGet(key) {
-  const hit = _shelfCache.get(key);
-  if (!hit) return null;
-  if (Date.now() > hit.expiresAt) {
-    _shelfCache.delete(key);
-    return null;
+function swrGet(key, path, transform, onRevalidate) {
+  const entry = readCache(key);
+  const age = entry ? Date.now() - entry.savedAt : Infinity;
+
+  // Fresh enough — serve straight from the cache, no network at all.
+  if (entry && age < FRESH_MS) return Promise.resolve(entry.data);
+
+  const network = getJson(path).then((raw) => {
+    const out = transform(raw);
+    writeCache(key, out);
+    return out;
+  });
+
+  if (entry) {
+    // A stale copy exists: hand it back NOW, revalidate in the background.
+    // A failed refresh (offline / backend down) keeps the stale copy we served.
+    network.then((fresh) => onRevalidate && onRevalidate(fresh)).catch(() => {});
+    return Promise.resolve(entry.data);
   }
-  return hit.data;
-}
 
-function _shelfSet(key, data) {
-  _shelfCache.set(key, { expiresAt: Date.now() + SHELF_TTL_MS, data });
+  // Nothing cached yet (first ever load) — we have to wait for the network.
+  return network;
 }
 
 // ---- Error helper -------------------------------------------------------- //
@@ -71,37 +87,33 @@ export function searchSongs(query, limit = 25) {
 
 /**
  * Fetch the default popular Telugu list for the home page (JioSaavn-backed).
- * Cached in-memory for 5 minutes.
+ * Persistently cached (stale-while-revalidate) so cold starts paint instantly.
+ * Pass `{ onRevalidate }` to receive the refreshed feed when a stale-serve
+ * later revalidates in the background.
  */
-export function getTrending(limit = 30) {
-  const key = `trending:${limit}`;
-  const cached = _shelfGet(key);
-  if (cached) return Promise.resolve(cached);
-
+export function getTrending(limit = 30, { onRevalidate } = {}) {
   const params = new URLSearchParams({ limit: String(limit) });
-  return getJson(`/trending?${params.toString()}`).then((d) => {
-    const out = { ...d, results: (d.results || []).map(normalizeTrack) };
-    _shelfSet(key, out);
-    return out;
-  });
+  return swrGet(
+    `trending:${limit}`,
+    `/trending?${params.toString()}`,
+    (d) => ({ ...d, results: (d.results || []).map(normalizeTrack) }),
+    onRevalidate
+  );
 }
 
 /**
  * Home mood-shelf query (JioSaavn-backed, artwork-rich). Same envelope shape
  * as /api/search but sourced for broad vibe queries where /suggestion is weak.
- * Cached in-memory for 5 minutes (per query string).
+ * Persistently cached (stale-while-revalidate) per query string.
  */
-export function getShelf(query, limit = 20) {
-  const key = `shelf:${query}:${limit}`;
-  const cached = _shelfGet(key);
-  if (cached) return Promise.resolve(cached);
-
+export function getShelf(query, limit = 20, { onRevalidate } = {}) {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
-  return getJson(`/trending?${params.toString()}`).then((d) => {
-    const out = { ...d, results: (d.results || []).map(normalizeTrack) };
-    _shelfSet(key, out);
-    return out;
-  });
+  return swrGet(
+    `shelf:${query}:${limit}`,
+    `/trending?${params.toString()}`,
+    (d) => ({ ...d, results: (d.results || []).map(normalizeTrack) }),
+    onRevalidate
+  );
 }
 
 /**
@@ -110,17 +122,14 @@ export function getShelf(query, limit = 20) {
  * These are album CARDS (not tracks), so we don't run normalizeTrack. Cached
  * per page for 5 minutes — the album list is effectively static.
  */
-export function getAlbums({ limit = 48, offset = 0 } = {}) {
-  const key = `albums:${limit}:${offset}`;
-  const cached = _shelfGet(key);
-  if (cached) return Promise.resolve(cached);
-
+export function getAlbums({ limit = 48, offset = 0 } = {}, { onRevalidate } = {}) {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  return getJson(`/albums?${params.toString()}`).then((d) => {
-    const out = { count: d.count || 0, results: d.results || [] };
-    _shelfSet(key, out);
-    return out;
-  });
+  return swrGet(
+    `albums:${limit}:${offset}`,
+    `/albums?${params.toString()}`,
+    (d) => ({ count: d.count || 0, results: d.results || [] }),
+    onRevalidate
+  );
 }
 
 /**
@@ -207,17 +216,14 @@ export async function getStream({ artist, song, url, signal } = {}) {
  * Returns { count, results:[{ albumId, name, year, artworkUrl600, count }] }.
  * These are album CARDS (not tracks), so we don't run normalizeTrack.
  */
-export function getNewReleases({ limit = 20, offset = 0 } = {}) {
-  const key = `newreleases:${limit}:${offset}`;
-  const cached = _shelfGet(key);
-  if (cached) return Promise.resolve(cached);
-
+export function getNewReleases({ limit = 20, offset = 0 } = {}, { onRevalidate } = {}) {
   const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
-  return getJson(`/new-releases?${params.toString()}`).then((d) => {
-    const out = { count: d.count || 0, results: d.results || [] };
-    _shelfSet(key, out);
-    return out;
-  });
+  return swrGet(
+    `newreleases:${limit}:${offset}`,
+    `/new-releases?${params.toString()}`,
+    (d) => ({ count: d.count || 0, results: d.results || [] }),
+    onRevalidate
+  );
 }
 
 /**
