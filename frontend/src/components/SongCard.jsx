@@ -6,6 +6,7 @@ import { useOffline } from "../context/OfflineContext";
 import { useRouter } from "../context/RouterContext";
 import LikeButton from "./LikeButton";
 import TrackMenu from "./TrackMenu";
+import CachedImage from "./CachedImage";
 
 /**
  * A single song tile: frosted card with artwork, hover lift, a play/pause
@@ -49,7 +50,7 @@ export default function SongCard({ song, list }) {
       }`}
     >
       <div className="relative aspect-square overflow-hidden rounded-2xl bg-white/5">
-        <img
+        <CachedImage
           src={song.artworkUrl600 || song.artworkUrl100}
           alt={song.trackName}
           loading="lazy"

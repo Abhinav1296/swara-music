@@ -2,6 +2,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Play, X } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
+import CachedImage from "./CachedImage";
 
 /**
  * Slide-in "Up Next" panel. Shows the currently playing track pinned at the
@@ -61,7 +62,7 @@ export default function QueuePanel() {
             </div>
             {current ? (
               <div className="mb-4 flex items-center gap-3 rounded-xl bg-white/5 p-2">
-                <img
+                <CachedImage
                   src={current.artworkUrl100}
                   alt=""
                   className="h-12 w-12 rounded-md object-cover"
@@ -104,7 +105,7 @@ export default function QueuePanel() {
                       onClick={() => playFromQueue(s, i)}
                       className="flex min-w-0 flex-1 items-center gap-3 text-left"
                     >
-                      <img
+                      <CachedImage
                         src={s.artworkUrl100}
                         alt=""
                         className="h-10 w-10 shrink-0 rounded-md object-cover"

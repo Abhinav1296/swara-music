@@ -1,6 +1,7 @@
 import { Disc3, Home, Library, Search, UserRound } from "lucide-react";
 import { useRouter } from "../context/RouterContext";
 import { useAuth } from "../context/AuthContext";
+import CachedImage from "./CachedImage";
 
 const ITEMS = [
   { id: "home", label: "Home", icon: Home },
@@ -31,7 +32,7 @@ export default function MobileNav() {
             }`}
           >
             {showAvatar ? (
-              <img
+              <CachedImage
                 src={user.picture}
                 alt=""
                 referrerPolicy="no-referrer"

@@ -2,6 +2,7 @@ import { ArrowDownToLine, Music2, Play, Trash2 } from "lucide-react";
 import { useOffline } from "../context/OfflineContext";
 import { usePlayer } from "../context/PlayerContext";
 import { formatTime } from "../utils/format";
+import CachedImage from "./CachedImage";
 
 /**
  * "Downloads" — songs saved for offline playback (B2). Native/APK only: off
@@ -89,7 +90,7 @@ export default function DownloadsSection() {
 
                 <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md bg-gradient-to-br from-white/15 to-white/5">
                   {song.artworkUrl600 ? (
-                    <img src={song.artworkUrl600} alt="" className="h-full w-full object-cover" />
+                    <CachedImage src={song.artworkUrl600} alt="" className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center">
                       <Music2 size={18} className="text-white/70" />

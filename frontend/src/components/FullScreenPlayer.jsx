@@ -24,6 +24,8 @@ import {
 import { usePlayer } from "../context/PlayerContext";
 import { useRouter } from "../context/RouterContext";
 import LikeButton from "./LikeButton";
+import CachedImage from "./CachedImage";
+import useCachedArt from "../hooks/useCachedArt";
 import { formatTime } from "../utils/format";
 import { resolveActiveLine } from "../lyrics/lyrics";
 import SyncedLyrics from "./SyncedLyrics";
@@ -223,7 +225,9 @@ export default function FullScreenPlayer() {
 
   const pct = duration ? Math.min(100, (progress / duration) * 100) : 0;
   const volPct = Math.round((volume ?? 0) * 100);
-  const art = current?.artworkUrl600 || current?.artworkUrl100;
+  // Offline-cache the active cover once; drives the big cover + both blurred
+  // backdrops. cachedSrcFor/primeArt no-op off native, so this is the remote URL.
+  const art = useCachedArt(current?.artworkUrl600 || current?.artworkUrl100);
   const panelBtn = (active) =>
     `flex flex-1 items-center justify-center gap-1.5 rounded-2xl px-3 py-2.5 text-sm font-semibold transition ${
       active
@@ -266,7 +270,7 @@ export default function FullScreenPlayer() {
               onClick={() => playFromUpNext(s)}
               className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-white/10"
             >
-              <img
+              <CachedImage
                 src={s.artworkUrl100}
                 alt=""
                 className="h-11 w-11 shrink-0 rounded-lg object-cover"

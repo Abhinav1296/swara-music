@@ -6,6 +6,7 @@ import { usePlaylists } from "../context/PlaylistContext";
 import { fileToSquareDataUrl } from "../utils/image";
 import GoogleSignInButton from "./GoogleSignInButton";
 import NativeGoogleSignInButton from "./NativeGoogleSignInButton";
+import CachedImage from "./CachedImage";
 import { isNativePlatform } from "../auth/nativeGoogleSignIn";
 
 // Suggested singers to seed the "favorites" picker (users can add any others).
@@ -146,7 +147,7 @@ function ProfileEditor({ logout }) {
           <div className="relative h-24 w-24 shrink-0">
             <div className="h-24 w-24 overflow-hidden rounded-full ring-1 ring-white/15">
               {user.picture && imgOk ? (
-                <img
+                <CachedImage
                   src={user.picture}
                   alt=""
                   referrerPolicy="no-referrer"

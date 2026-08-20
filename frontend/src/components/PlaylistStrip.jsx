@@ -2,6 +2,7 @@ import { Music2, Pause, Play } from "lucide-react";
 import { usePlaylists } from "../context/PlaylistContext";
 import { usePlayer } from "../context/PlayerContext";
 import { useRouter } from "../context/RouterContext";
+import CachedImage from "./CachedImage";
 
 /**
  * A sideways, swipeable carousel of the user's playlists at the top of Library,
@@ -35,7 +36,7 @@ export default function PlaylistStrip() {
             >
               <div className="relative aspect-square overflow-hidden rounded-2xl bg-gradient-to-br from-white/15 to-white/5 ring-1 ring-white/10 shadow-glow">
                 {p.cover ? (
-                  <img src={p.cover} alt="" className="h-full w-full object-cover" />
+                  <CachedImage src={p.cover} alt="" className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center">
                     <Music2 size={38} className="text-white/90" />

@@ -11,6 +11,7 @@ import RecommendationsShelf from "./RecommendationsShelf";
 import Marquee from "./Marquee";
 import OfflineNotice from "./OfflineNotice";
 import useOnlineStatus from "../hooks/useOnlineStatus";
+import useCachedArt from "../hooks/useCachedArt";
 
 // Curated Telugu moods → JioSaavn search queries. Each becomes a horizontal
 // shelf, fetched live from JioSaavn (daily-cached) via /api/trending?q=…
@@ -218,6 +219,10 @@ export default function HomeView() {
 
   const featured = heroItems[heroIdx];
   const featuredPlaying = featured && current?.id === featured.id && isPlaying;
+  // Offline-cache the hero cover (drives both the blurred backdrop and the big
+  // tile). No-ops off native — stays the remote URL on web. Kept above the
+  // early return below so the hook order never changes between renders.
+  const heroArt = useCachedArt(featured?.artworkUrl600 || featured?.artworkUrl100);
 
   // Only bail to the offline notice when there's genuinely nothing to show — no
   // cached feed AND the live fetch failed. With a cached copy (even fully
@@ -249,7 +254,7 @@ export default function HomeView() {
             <AnimatePresence>
               <motion.img
                 key={featured.id}
-                src={featured.artworkUrl600 || featured.artworkUrl100}
+                src={heroArt}
                 alt=""
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 0.55 }}
@@ -267,7 +272,7 @@ export default function HomeView() {
               initial={{ scale: 0.94, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ type: "spring", stiffness: 200, damping: 24 }}
-              src={featured.artworkUrl600 || featured.artworkUrl100}
+              src={heroArt}
               alt={featured.trackName}
               className="h-44 w-44 shrink-0 rounded-2xl object-cover shadow-2xl ring-1 ring-white/15 md:h-56 md:w-56"
             />

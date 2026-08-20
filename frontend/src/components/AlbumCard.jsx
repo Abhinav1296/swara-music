@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { useRouter } from "../context/RouterContext";
 import { placeholderArtwork } from "../utils/trackAdapter";
+import CachedImage from "./CachedImage";
 
 /**
  * Square, tappable album tile for the Albums browse grid. Navigates to the
@@ -27,7 +28,7 @@ export default function AlbumCard({ album }) {
       className="group flex w-full flex-col gap-2 rounded-2xl p-2 text-left transition hover:bg-white/5"
     >
       <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-white/5 shadow-lg ring-1 ring-white/10 transition group-hover:ring-accent/40">
-        <img
+        <CachedImage
           src={art}
           alt={album.name}
           loading="lazy"

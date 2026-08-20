@@ -4,6 +4,7 @@ import { useOffline } from "../context/OfflineContext";
 import { useRouter } from "../context/RouterContext";
 import LikeButton from "./LikeButton";
 import TrackMenu from "./TrackMenu";
+import CachedImage from "./CachedImage";
 import { formatTime } from "../utils/format";
 
 /**
@@ -66,7 +67,7 @@ export default function TrackRow({ song, index, list }) {
         )}
       </div>
 
-      <img src={song.artworkUrl100} alt="" className="h-10 w-10 shrink-0 rounded-md object-cover" />
+      <CachedImage src={song.artworkUrl100} alt="" className="h-10 w-10 shrink-0 rounded-md object-cover" />
 
       <div className="min-w-0 flex-1">
         <p

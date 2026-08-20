@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { useRouter } from "../context/RouterContext";
+import CachedImage from "./CachedImage";
 
 /** Circular, tappable artist tile used in the Popular Artists shelf. */
 export default function ArtistCard({ artist }) {
@@ -14,7 +15,7 @@ export default function ArtistCard({ artist }) {
       className="group flex w-40 shrink-0 cursor-pointer flex-col items-center gap-3"
     >
       <div className="relative h-40 w-40 overflow-hidden rounded-full bg-white/5 shadow-lg ring-1 ring-white/10 transition group-hover:ring-accent/40">
-        <img
+        <CachedImage
           src={artist.artwork}
           alt={artist.name}
           loading="lazy"

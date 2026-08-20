@@ -11,6 +11,7 @@ import PlaylistModal from "./PlaylistModal";
 import AddToPlaylistSheet from "./AddToPlaylistSheet";
 import DownloadsSection from "./DownloadsSection";
 import LocalFilesSection from "./LocalFilesSection";
+import CachedImage from "./CachedImage";
 
 const GRID =
   "grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6";
@@ -140,7 +141,7 @@ export default function LibraryView() {
                 onOpen={() => navigate("playlist", { id: p.id, name: p.name })}
                 cover={
                   p.cover ? (
-                    <img src={p.cover} alt="" className="h-full w-full object-cover" />
+                    <CachedImage src={p.cover} alt="" className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center">
                       <Music2 size={38} className="text-white/90" />
@@ -225,7 +226,7 @@ export default function LibraryView() {
                 onOpen={() => navigate("playlist", { id: p.id, name: p.name })}
                 cover={
                   p.cover ? (
-                    <img src={p.cover} alt="" className="h-full w-full object-cover" />
+                    <CachedImage src={p.cover} alt="" className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center">
                       <Music2 size={38} className="text-white/90" />

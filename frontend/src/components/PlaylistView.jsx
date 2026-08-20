@@ -26,6 +26,7 @@ import { useRouter } from "../context/RouterContext";
 import { fileToSquareDataUrl } from "../utils/image";
 import TrackRow from "./TrackRow";
 import PlaylistModal from "./PlaylistModal";
+import CachedImage from "./CachedImage";
 
 /**
  * One draggable row in the rearrange list. Drag is initiated ONLY from the grip
@@ -51,7 +52,7 @@ function ReorderRow({ song }) {
       >
         <GripVertical size={18} />
       </button>
-      <img
+      <CachedImage
         src={song.artworkUrl100}
         alt=""
         className="h-11 w-11 shrink-0 rounded-md object-cover"
@@ -235,7 +236,7 @@ export default function PlaylistView() {
           <div className="relative h-40 w-40 shrink-0 md:h-52 md:w-52">
             <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-white/15 to-white/5 shadow-2xl ring-1 ring-white/10">
               {playlist.cover ? (
-                <img src={playlist.cover} alt="" className="h-full w-full object-cover" />
+                <CachedImage src={playlist.cover} alt="" className="h-full w-full object-cover" />
               ) : (
                 <Music2 size={56} className="text-white/90" />
               )}

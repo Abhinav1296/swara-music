@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { lookup } from "../api/client";
 import { usePlayer } from "../context/PlayerContext";
 import TrackRow from "./TrackRow";
+import CachedImage from "./CachedImage";
 
 /**
  * Shared Artist / Album detail page. Resolves a name via /api/lookup (Lyrica/
@@ -61,7 +62,7 @@ export default function DetailView({ name, kind, artist, year, saavnId }) {
         <div className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-accent/25 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-28 left-12 h-72 w-72 rounded-full bg-accent/12 blur-3xl" />
         <div className="glass relative flex flex-col items-center gap-6 p-6 md:flex-row md:gap-8 md:p-8">
-          <img
+          <CachedImage
             src={data?.artworkUrl600 || ""}
             alt={data?.title || name}
             className="h-40 w-40 shrink-0 rounded-2xl object-cover shadow-2xl ring-1 ring-white/10 md:h-52 md:w-52"

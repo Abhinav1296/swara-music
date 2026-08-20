@@ -2,6 +2,7 @@ import { Disc3, Home, Library, Music2, Search, UserRound } from "lucide-react";
 import { motion } from "framer-motion";
 import { useRouter } from "../context/RouterContext";
 import { useAuth } from "../context/AuthContext";
+import CachedImage from "./CachedImage";
 
 const NAV_ITEMS = [
   { id: "home", label: "Home", icon: Home },
@@ -66,7 +67,7 @@ export default function Sidebar() {
         }`}
       >
         {isAuthed && user?.picture ? (
-          <img
+          <CachedImage
             src={user.picture}
             alt=""
             referrerPolicy="no-referrer"

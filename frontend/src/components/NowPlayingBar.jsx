@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { usePlayer } from "../context/PlayerContext";
 import LikeButton from "./LikeButton";
+import CachedImage from "./CachedImage";
 import { formatTime } from "../utils/format";
 
 /**
@@ -113,7 +114,7 @@ export default function NowPlayingBar() {
           aria-label="Open full-screen player"
           className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-xl shadow-lg md:h-14 md:w-14"
         >
-          <img
+          <CachedImage
             src={current.artworkUrl100}
             alt=""
             className="h-full w-full object-cover"
