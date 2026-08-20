@@ -268,6 +268,34 @@ def _search_sync(q: str, limit: int) -> List[Dict[str, Any]]:
     return [_to_song(d) for d in docs]
 
 
+def _lyric_matches_sync(q: str, limit: int) -> List[Dict[str, Any]]:
+    """Find catalog songs whose VETTED lyrics literally contain the query as a
+    contiguous phrase — this is what makes search lyrics-aware: type a line you
+    remember and the song surfaces. It is a precise substring match on
+    ``lyrics_text`` (never a tokenised ``$text`` OR-match), restricted to docs
+    with real lyrics, so it cannot drift to unrelated genres the way the old
+    keyword search did, and only ever returns songs we truly have lyrics for
+    (purity: coverage is never faked)."""
+    q = (q or "").strip()
+    if len(q) < 4:  # too short to be a meaningful lyric fragment
+        return []
+    col = _col()
+    rx = re.compile(re.escape(q), re.I)
+    try:
+        docs = list(col.find({"lyrics_text": rx, "lyrics_missing": False}).limit(limit))
+    except Exception:
+        docs = []
+    return [_to_song(d) for d in docs]
+
+
+def _dedup_key(s: Dict[str, Any]) -> str:
+    """Whitespace/case-insensitive (title|artist) key for de-duping merged
+    results. Keeps unicode intact so Telugu-script titles stay distinct."""
+    t = "".join((s.get("title") or "").lower().split())
+    a = "".join((s.get("artist") or "").lower().split())
+    return f"{t}|{a}"
+
+
 def _trending_sync(limit: int) -> List[Dict[str, Any]]:
     col = _col()
     # A pleasant home shelf: songs that already HAVE lyrics, newest first.
@@ -633,9 +661,29 @@ async def search_songs(query: str, limit: Optional[int] = None) -> Dict[str, Any
         logger.warning("jiosaavn search failed for %r: %s", q, exc)
 
     if not songs:
+        # JioSaavn gave nothing (offline / miss) — fall back to our own catalog,
+        # which already matches title/movie/singers AND lyrics_text.
         db = await asyncio.to_thread(_search_sync, q, limit)
         return {"query": q, "count": len(db), "results": db, "source": SOURCE}
-    return {"query": q, "count": len(songs), "results": songs, "source": SOURCE}
+
+    # Lyrics-aware unification: also surface catalog songs whose VETTED lyrics
+    # literally contain the typed line, then merge them with JioSaavn's own
+    # title/artist results. The substring match (never tokenised $text) keeps
+    # this immune to the old generic-token wrong-genre drift.
+    extras = await asyncio.to_thread(_lyric_matches_sync, q, limit)
+    if extras:
+        seen = {_dedup_key(s) for s in songs}
+        extras = [s for s in extras if _dedup_key(s) not in seen]
+    if extras:
+        # A long typed phrase reads as a remembered lyric line → lead with the
+        # exact-lyric matches; a short query reads as title/artist → keep
+        # JioSaavn's ranking first and append the lyric finds.
+        is_phrase = len(q) >= 12 or q.count(" ") >= 2
+        merged = (extras + songs) if is_phrase else (songs + extras)
+    else:
+        merged = songs
+    merged = merged[:limit]
+    return {"query": q, "count": len(merged), "results": merged, "source": SOURCE}
 
 
 # ── live JioSaavn home rows (Trending / mood shelves, refreshed daily) ────────
